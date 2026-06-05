@@ -25,7 +25,7 @@ msgid "Removable Devices"
 msgstr "الأجهزة القابلة للإزالة"
 
 msgid "Disc Images"
-msgstr "صور الأقراص"
+msgstr ""
 
 msgid "Network Volumes"
 msgstr "مجلدات الشبكة"
@@ -131,3 +131,9 @@ msgstr "افتح في نافذة جديدة"
 
 msgid "Properties"
 msgstr "الخصائص"
+
+msgid "Hide system partitions"
+msgstr "إخفاء أقسام النظام"
+
+msgid "Hide boot and EFI drives"
+msgstr "إخفاء أقسام الإقلاع و EFI"

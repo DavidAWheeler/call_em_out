@@ -32,5 +32,11 @@
       <description>Right color (stop 100%) used when color-mode is gradient</description>
     </key>
 
+    <key name="hide-system-partitions" type="b">
+      <default>true</default>
+      <summary>Hide system partitions</summary>
+      <description>Hide partitions like boot and EFI</description>
+    </key>
+
   </schema>
 </schemalist>

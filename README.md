@@ -8,6 +8,7 @@
 
 <br>
 
+![GitHub Tag](https://img.shields.io/github/v/tag/yannmasoch/nautilus-my-computer)
 ![GitHub License](https://img.shields.io/github/license/yannmasoch/nautilus-my-computer?color=50fa7b)
 [![Stars](https://img.shields.io/github/stars/yannmasoch/nautilus-my-computer?style=social)](https://github.com/yannmasoch/nautilus-my-computer/stargazers)
 
@@ -24,7 +25,11 @@
 ### Quick install (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yannmasoch/nautilus-my-computer/main/install.sh | bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/yannmasoch/nautilus-my-computer/main/install.sh)"
+```
+### Install specific version from another branch
+```bash
+VERSION=[branch_name] bash -c "$(curl -fsSL https://raw.githubusercontent.com/yannmasoch/nautilus-my-computer/main/install.sh)"
 ```
 
 ### Manual install from a local clone
@@ -46,23 +51,27 @@ Nothing is written outside your home directory.
 
 > To uninstall, re-run the installer and choose **Uninstall**. It removes the extension, the schema, and resets all preferences.
 
+## My Computer
 
-## Features
+### Sidebar integration
 
-- **All your storage in one place:** local drives, USB sticks, phones, network mounts, and removable media grouped by type.
-- **Usage bars:** at-a-glance capacity for every mounted volume.
-- **Mount & eject:** mount, unmount, and eject volumes directly from the panel without leaving Files.
-- **Live refresh:** the panel updates automatically when drives are connected or disconnected.
-- **Fully native:** follows your GNOME accent color, icon theme, and dark/light mode with no extra configuration.
-- **Customizable bars:** choose between GNOME accent color, a custom color, or a custom gradient for the usage bars.
-- **Start on My Computer:** choose to open GNOME Files directly on the My Computer panel every time.
-- **Right-click context menu:** open, open in new tab, open in new window, mount, unmount, and eject volumes directly from a native-feel context menu.
+Computer sits at the top of the GNOME Files sidebar, click to open the panel and right-click for settings.
+
+![Computer button](assets/images/computer-button.png)
+
+### Settings page
+
+My Computer Settings let you open GNOME Files directly on the Computer view at startup, and customize the disk usage bar color to match your style.
+
+![Settings Page](assets/images/settings-page.png)
+
+> Settings are stored via GSettings under `io.github.yannmasoch.nautilus-my-computer` and persist across sessions.
 
 ## Style
 
 ### Color mode for disk usage bars
 
-Volume capacity is shown as a native `Gtk.LevelBar`. Three color modes are available in Settings:
+Disk usage is shown as a native `Gtk.LevelBar`. Three color modes are available in Settings.
 
 ![Color mode preview](assets/images/color-mode.png)
 
@@ -76,23 +85,27 @@ The panel follows GNOME's light/dark preference natively, with no extra configur
 
 ![Light and dark mode](assets/images/light-and-dark-mode.png)
 
-### Settings page & Nautilus menu integration
-
-The Settings page is accessible directly from the Nautilus menu **(⋮)**
-
-![Settings Page](assets/images/settings-page.png)
-
-> Settings are stored via GSettings under `io.github.yannmasoch.nautilus-my-computer` and persist across sessions.
-
 ### GNOME icon theme
 
 All icons are native GNOME icons. My Computer works with any custom icon theme.
 
+## Features
+
+- **All your storage in one place:** local drives, USB sticks, phones, network mounts, and removable media grouped by type.
+- **Usage bars:** at-a-glance capacity for every mounted volume.
+- **Mount & eject:** mount, unmount, and eject volumes directly from the panel without leaving Files.
+- **Live refresh:** the panel updates automatically when drives are connected or disconnected.
+- **Fully native:** follows your GNOME accent color, icon theme, and dark/light mode with no extra configuration.
+- **Customizable bars:** choose between GNOME accent color, a custom color, or a custom gradient for the usage bars.
+- **Start on My Computer:** choose to open GNOME Files directly on the My Computer panel every time.
+- **Right-click context menu:** open, open in new tab, open in new window, mount, unmount, and eject volumes directly from a native-feel context menu.
+  
 ## Tested on
 
 | | Distro | GNOME Files | Status |
 |---|--------|-------------|--------|
 | ✅ | Arch | 50.2.2 | Fully working |
+| ✅ | Fedora 44 Workstation | 50.2.2 | Fully working |
 | ✅ | Fedora 44 Workstation | 50.0 | Fully working |
 | ✅ | Ubuntu 26.04 LTS | 50.0 | Fully working |
 | ☑️ | Zorin OS 18 | 46.4 | Partial, background colors and the My Computer menu entry are not available (Zorin ships a customised build of GNOME Files). Will be improved in a future release |

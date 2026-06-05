@@ -45,19 +45,17 @@ DEBUG_LOG_PREFIX = "MyComputer"  # prefix for all debug lines, to make them easy
 
 # ── Extension metadata (keep in sync with pyproject.toml) ────────────────────
 EXT_NAME = "My Computer for Nautilus"
-EXT_VERSION = "0.2.1"
+EXT_VERSION = "0.3.0"
 EXT_AUTHOR = "Yann Masoch"
 EXT_LICENSE = "MIT"
 EXT_GITHUB = "https://github.com/yannmasoch/nautilus-my-computer"
 
 
 DISKS_URI = "computer:///"
-BOOKMARK_LABEL = "Computer"
-BOOKMARK_LABEL_LOCAL = _(BOOKMARK_LABEL)
-BOOKMARKS_FILE = os.path.expanduser("~/.config/gtk-3.0/bookmarks")
+COMPUTER_LABEL = _("Computer")
 COMPUTER_ICON = "computer-symbolic"  # icon used in sidebar and path bar
-MENU_ITEM_LABEL = "My Computer Settings"  # label in Nautilus hamburger menu
-PREFS_WIN_TITLE = "My Computer Settings"  # title of the preferences window
+MENU_ITEM_LABEL = _("My Computer Settings")
+PREFS_WIN_TITLE = _("My Computer Settings")
 SCHEMA_ID = "io.github.yannmasoch.nautilus-my-computer"
 
 STACK_FILES = "files"  # name of the normal file-browser child in our Gtk.Stack
@@ -66,7 +64,6 @@ STACK_DISKINFO = "diskinfo"  # name of our custom panel child in our Gtk.Stack
 METADATA_SORT_BY = "metadata::nautilus-icon-view-sort-by"
 METADATA_SORT_REVERSED = "metadata::nautilus-icon-view-sort-reversed"
 
-ACTION_PREFS = "my-computer-prefs"
 DBUS_FILE_MANAGER = "org.freedesktop.FileManager1"
 DBUS_PATH_FILE_MANAGER = "/org/freedesktop/FileManager1"
 
@@ -75,6 +72,7 @@ DBUS_PATH_FILE_MANAGER = "/org/freedesktop/FileManager1"
 # below are one-shot retry/debounce intervals, not continuous poll periods.
 _REFRESH_DEBOUNCE_MS = 300  # coalesce rapid mount/unmount/plug events
 _WIN_INIT_RETRY_MS = 20  # retry interval while waiting for NautilusWindow widget tree
+_WIN_INIT_MAX_ATTEMPTS = 100  # ~2 s budget waiting for the first view load to settle
 _NAV_RETRY_MS = 60  # retry interval while navigating to computer:///
 _TAB_WAIT_MS = 50  # retry interval while waiting for a new tab slot
 _USAGE_GATE_MS = 1000  # idle cadence: try a statvfs sweep this often, skip while disk is busy
@@ -102,7 +100,7 @@ try:
     )
     _LOCATION_TITLE = _info.get_display_name()
 except Exception:
-    _LOCATION_TITLE = BOOKMARK_LABEL_LOCAL
+    _LOCATION_TITLE = COMPUTER_LABEL
 
 # Localized title Nautilus shows when browsing the user's home folder.
 # Used to distinguish a "default new window" (opened at Home) from a window
@@ -293,10 +291,6 @@ _GROUPS: list[tuple[str, str]] = [
 
 _disk_data: dict[str, MountInfo] = {}
 _network_places: list[MountInfo] = []  # populated async from network:///
-_sidebar_row_destination_prop_cache: dict[
-    str, str | bool
-] = {}  # row class → property name or False
-
 
 _CSS = b"""
 * {
@@ -317,6 +311,29 @@ _CSS = b"""
 }
 .unmounted {
     opacity: 0.5;
+}
+.gap-debug {
+    margin: 0;
+    padding: 0;
+}
+#my_computer_list {
+    padding: 0;
+    margin: 0;
+}
+#my_computer {
+    padding-left: 0;
+    padding-right: 0;
+}
+#my_computer revealer {
+    padding-left: 14px;
+    padding-right: 14px;
+}
+#places_sidebar {
+    margin-top: 0;
+}
+.places-sidebar-list {
+    padding-top: 0;
+    margin-top: 0;
 }
 """
 
@@ -382,12 +399,6 @@ def _read_dirty_bytes() -> int:
     except (OSError, ValueError, IndexError):
         pass
     return dirty + writeback
-
-
-_log(
-    f"Configured URI title: '{_LOCATION_TITLE}'"
-    f" (Bookmark: '{BOOKMARK_LABEL}', Local: '{BOOKMARK_LABEL_LOCAL}')"
-)
 
 
 def _get_gsettings() -> Gio.Settings | None:
@@ -648,22 +659,6 @@ def _refresh(mounts: list[MountInfo]) -> bool:
     return changed
 
 
-def _ensure_bookmark() -> None:
-    os.makedirs(os.path.dirname(BOOKMARKS_FILE), exist_ok=True)
-    lines: list[str] = []
-    if os.path.exists(BOOKMARKS_FILE):
-        with open(BOOKMARKS_FILE) as f:
-            lines = [line for line in f.read().splitlines() if line.strip()]
-    if any(line.split(None, 1)[0] == DISKS_URI for line in lines):
-        return  # already present — preserve user's custom label, don't overwrite
-    # GTK bookmarks are stored as "destination-uri optional-label". We key our
-    # sidebar bookmark detection off the destination URI, not the label, so user
-    # renames remain stable.
-    lines.insert(0, f"{DISKS_URI} {BOOKMARK_LABEL_LOCAL}")
-    with open(BOOKMARKS_FILE, "w") as f:
-        f.write("\n".join(lines) + "\n")
-
-
 _ZOOM_TO_PX = {"small": 48, "standard": 64, "large": 96, "x-large": 128}
 
 
@@ -686,30 +681,6 @@ def _all_widgets(widget):
     while child:
         yield from _all_widgets(child)
         child = child.get_next_sibling()
-
-
-def _iter_children(widget):
-    if not widget:
-        return
-    child = widget.get_first_child()
-    while child:
-        yield child
-        child = child.get_next_sibling()
-
-
-def _menu_has_action(model, action_name) -> bool:
-    """Recursively check whether a GMenuModel already contains *action_name*.
-    Walks sections and submenus so dedup works regardless of menu nesting."""
-    str_type = GLib.VariantType("s")
-    for i in range(model.get_n_items()):
-        av = model.get_item_attribute_value(i, Gio.MENU_ATTRIBUTE_ACTION, str_type)
-        if av is not None and av.get_string() == action_name:
-            return True
-        for link in (Gio.MENU_LINK_SECTION, Gio.MENU_LINK_SUBMENU):
-            sub = model.get_item_link(i, link)
-            if sub is not None and _menu_has_action(sub, action_name):
-                return True
-    return False
 
 
 def _find_widget(root, *, buildable_id=None, class_name=None, css_class=None, site=""):
@@ -881,7 +852,6 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         # popover (which is a separate native surface and triggers a leave event).
         self._sort_poll_id = None  # GLib source id while polling, else None
         self._sort_hover = False  # True while pointer is inside the navbar
-        self._bookmark_monitor = None  # Gio.FileMonitor for ~/.config/gtk-3.0/bookmarks
         self._nautilus_prefs = None  # Gio.Settings for org.gnome.nautilus.preferences
         self._bar_css_provider = Gtk.CssProvider()
         self._bar_css_display = None
@@ -895,7 +865,6 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             self._start_on_disks = False
 
         _refresh(_scan_mounts() + _scan_gio_mounts() + _scan_gio_volumes())
-        _ensure_bookmark()
 
         # Watch /proc/mounts at the kernel level — POLLPRI fires on any
         # mount/unmount regardless of how it happened (udisks, manual, FUSE…)
@@ -941,14 +910,29 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             if app:
                 app.connect("window-added", self._on_window_added)
             self._read_sort_metadata()
-            self._watch_bookmarks()
             self._read_view_mode()
             self._watch_view_mode()
 
         return False
 
     def _on_window_added(self, _app, win: Gtk.Window) -> None:
-        """Instant handler for new Nautilus windows — retries until widget tree is ready."""
+        """Instant handler for new Nautilus windows — defers injection until load settles."""
+        self._schedule_window_init(win)
+
+    def _schedule_window_init(self, win: Gtk.Window) -> None:
+        """Wait for the window's first view load to settle, then inject on a
+        low-priority idle.
+
+        Injecting our Gtk.Stack reparents the AdwToolbarView content. Doing that
+        during Nautilus's files_view_begin_loading races with its templates
+        context-menu rebuild: with a non-empty ~/Templates,
+        slot_on_templates_menu_changed rebuilds a GtkPopoverMenu whose internal
+        GtkStack our tree surgery destabilises, hitting a Nautilus-core
+        use-after-free that segfaults on GTK 4.22 / GNOME 50 (GTK_IS_STACK
+        assertion → SIGSEGV). Deferring until the load has finished, and running
+        the injection at PRIORITY_LOW (after Nautilus's loading idles drain),
+        removes the overlap. See issue #4. Empty ~/Templates never triggers it.
+        """
         if not _is_nautilus_window(win) or win in self._windows:
             return
         attempts = [0]
@@ -956,60 +940,26 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         def _try() -> bool:
             if win in self._windows:
                 return GLib.SOURCE_REMOVE
-            if self._init_window(win):
-                return GLib.SOURCE_REMOVE
             attempts[0] += 1
-            if attempts[0] > 25:  # ~500 ms budget
-                return GLib.SOURCE_REMOVE
-            return GLib.SOURCE_CONTINUE
+            # Hold off until the widget tree exists AND the first load has
+            # settled (title resolved to a real location, not "Loading…").
+            if _is_unsettled_title(win.get_title() or ""):
+                if attempts[0] > _WIN_INIT_MAX_ATTEMPTS:
+                    # Window never settled (rare) — inject anyway so the
+                    # extension still works; route through the low-prio idle.
+                    GLib.idle_add(self._deferred_init_window, win, priority=GLib.PRIORITY_LOW)
+                    return GLib.SOURCE_REMOVE
+                return GLib.SOURCE_CONTINUE
+            GLib.idle_add(self._deferred_init_window, win, priority=GLib.PRIORITY_LOW)
+            return GLib.SOURCE_REMOVE
 
         GLib.timeout_add(_WIN_INIT_RETRY_MS, _try)
 
-    def _inject_main_menu(self, win: Gtk.Window) -> None:
-        app = Gio.Application.get_default()
-        if not app:
-            return
-        # Register the app action once.
-        if not app.has_action(ACTION_PREFS):
-            act = Gio.SimpleAction.new(ACTION_PREFS, None)
-            act.connect("activate", lambda *_: self._launch_prefs(app.get_active_window()))
-            app.add_action(act)
-        # Locate the hamburger among the window's GtkMenuButtons.
-        # Tier 1: icon name 'open-menu-symbolic' (unique, proven).
-        # Tier 2: css class 'popup' — only the hamburger carries it (the
-        #   view-controls button is a GtkToggleButton with 'image-button'/'toggle'),
-        #   so it is a safe fallback if Nautilus ever changes the hamburger icon.
-        menu_buttons = [w for w in _all_widgets(win) if isinstance(w, Gtk.MenuButton)]
-        btn = next((w for w in menu_buttons if w.get_icon_name() == "open-menu-symbolic"), None)
-        if btn is None:
-            btn = next((w for w in menu_buttons if w.has_css_class("popup")), None)
-            if btn is not None:
-                _log("inject_main_menu: hamburger matched via css 'popup' (icon-name drift)")
-        if btn is None:
-            _log(
-                "inject_main_menu: hamburger MenuButton not found "
-                "(no open-menu-symbolic icon, no .popup class)"
-            )
-            return
-        model = btn.get_menu_model()
-        if not isinstance(model, Gio.Menu):
-            _log(
-                f"inject_main_menu: hamburger model not a mutable Gio.Menu "
-                f"({type(model).__name__}) — skipping menu item"
-            )
-            return
-
-        action_name = f"app.{ACTION_PREFS}"
-        # Dedup guard: skip if our entry is already present (protects against a
-        # shared/app-level model or any re-injection path — confirmed not live
-        # today, where each window owns its model, but cheap insurance).
-        if _menu_has_action(model, action_name):
-            return
-        section = Gio.Menu()
-        section.append(_(MENU_ITEM_LABEL), action_name)
-        # Insert before the last section (Preferences/Help/About). Clamp at 0
-        # in case the menu shape changes and the model is unexpectedly empty.
-        model.insert_section(max(model.get_n_items() - 1, 0), None, section)
+    def _deferred_init_window(self, win: Gtk.Window) -> bool:
+        """Low-priority idle wrapper around _init_window (always one-shot)."""
+        if win not in self._windows and _is_nautilus_window(win):
+            self._init_window(win)
+        return GLib.SOURCE_REMOVE
 
     def _init_window(self, win: Gtk.Window) -> bool:
         css = Gtk.CssProvider()
@@ -1027,26 +977,10 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             win.connect("destroy", self._on_window_destroyed)
             win.connect("notify::title", self._on_title_changed)
 
-            # Initial attempt to fix icons. If they aren't ready yet,
-            # _on_title_changed will retry when navigation happens.
-            #
-            # Defer all post-inject work to an idle callback. _inject_stack()
-            # has just reparented the ToolbarView content into our GtkStack;
-            # GTK has not yet finished processing the widget-tree change.
-            # Any operation that triggers GObject signals (menu insertion,
-            # stack child switching, property notifications) can cascade
-            # through GtkPopoverMenuBar / NautilusWindowSlot into
-            # gtk_stack_get_page() on the internal stack — which is no
-            # longer in the expected position after reparenting.  Deferring
-            # to idle lets GTK settle the tree first, avoiding the
-            # GTK_IS_STACK assertion and the resulting SIGSEGV.
-            def _deferred_init(w=win):
-                self._fix_sidebar_icon(w)
-                self._attach_pathbar(w)
-                self._inject_main_menu(w)
-                self._on_title_changed(w, None)
-                return False  # one-shot
-            GLib.idle_add(_deferred_init)
+            self._inject_sidebar_link(win)
+            self._attach_pathbar(win)
+            self._on_title_changed(win, None)
+
             return True
         return False
 
@@ -1056,7 +990,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         for win in toplevels:
             if _is_nautilus_window(win) and win not in self._windows:
                 found_any = True
-                self._init_window(win)
+                # Route through the deferred path: a window present at
+                # extension-load time may still be mid-load (see issue #4).
+                self._schedule_window_init(win)
         if toplevels and not found_any and not self._windows:
             names = [type(w).__name__ for w in toplevels]
             _log(f"check_new_windows: no NautilusWindow found among {names} — class renamed?")
@@ -1244,33 +1180,6 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             self._sort_poll_id = None
             return GLib.SOURCE_REMOVE
         return GLib.SOURCE_CONTINUE
-
-    def _watch_bookmarks(self) -> None:
-        try:
-            f = Gio.File.new_for_path(BOOKMARKS_FILE)
-            monitor = f.monitor_file(Gio.FileMonitorFlags.NONE, None)
-            monitor.connect("changed", self._on_bookmarks_file_changed)
-            self._bookmark_monitor = monitor
-        except Exception:
-            pass
-
-    def _on_bookmarks_file_changed(self, _monitor, _file, _other, event) -> None:
-        if event not in (
-            Gio.FileMonitorEvent.CHANGED,
-            Gio.FileMonitorEvent.CREATED,
-            Gio.FileMonitorEvent.CHANGES_DONE_HINT,
-        ):
-            return
-
-        def _fix_all():
-            for w in list(self._windows):
-                self._fix_sidebar_icon(w)
-            return GLib.SOURCE_REMOVE
-
-        GLib.idle_add(_fix_all)
-        # Safety net: Nautilus debounces its sidebar rebuild, so the new row widget
-        # may not exist yet when the idle fires. Re-run after 200 ms to catch it.
-        GLib.timeout_add(200, _fix_all)
 
     def _read_view_mode(self) -> None:
         """Read current view mode from Nautilus preferences GSettings."""
@@ -1629,21 +1538,6 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         return panel, scroll, grid_box
 
-    def _sort_debug_label(self) -> str:
-        col = self._sort_column
-        rev = self._sort_reverse
-        _labels = {
-            "name": ("A→Z", "Z→A"),
-            "size": ("size ↑", "size ↓"),
-            "type": ("type A→Z", "type Z→A"),
-            "mtime": ("modified newest", "modified oldest"),
-            "atime": ("accessed newest", "accessed oldest"),
-            "btime": ("created newest", "created oldest"),
-            "starred": ("starred first", "starred last"),
-        }
-        pair = _labels.get(col, (col, f"{col} ↓"))
-        return f"Debug: sort {pair[1] if rev else pair[0]}"
-
     def _populate(self, win: Gtk.Window) -> None:
         state = self._windows.get(win)
         if state is None:
@@ -1889,10 +1783,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         if not self._has_live_stack(state, "title changed"):
             return
 
-        # Ensure we have the pathbar and sidebar fixed
         if not state.get("pathbar"):
             self._attach_pathbar(win)
-        self._fix_sidebar_icon(win)
 
         current_title = win.get_title() or ""
         in_view = _LOCATION_TITLE in current_title
@@ -1938,6 +1830,10 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                 GLib.idle_add(
                     lambda: [f.unselect_all() for f in state.get("section_flows", [])] and False
                 )
+                sidebar_lb = state.get("sidebar_listbox")
+                sidebar_row = state.get("sidebar_row")
+                if sidebar_lb and sidebar_row:
+                    GLib.idle_add(lambda lb=sidebar_lb, r=sidebar_row: lb.select_row(r) or False)
 
             # Re-pin the chrome icons (path-bar chip + sidebar row) every time we
             # arrive at the computer view. This must run even when the stack is
@@ -1958,16 +1854,14 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                     flow.unselect_all()
                 state["_deselecting"] = False
                 state["selected_key"] = None
+            sidebar_lb = state.get("sidebar_listbox")
+            if sidebar_lb:
+                GLib.idle_add(lambda lb=sidebar_lb: lb.unselect_all() or False)
             if not self._set_stack_visible_child(state, STACK_FILES, "title changed show files"):
                 return
             self._stop_usage_poll_if_idle()
 
     # ── Callbacks ─────────────────────────────────────────────────────────────
-
-    def _on_refresh(self, _btn) -> None:
-        _refresh(_scan_mounts() + _scan_gio_mounts() + _scan_gio_volumes())
-        _refresh_network_places(on_done=self._repopulate_visible)
-        self._repopulate_visible()
 
     def _on_row_key_pressed(
         self, ctrl, keyval, keycode, state, win: Gtk.Window, row: Gtk.Box
@@ -2210,12 +2104,6 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         except GLib.Error as e:
             _log(f"format launch failed: {e.message}")
 
-    def _do_open_with(self, nav_uri: str, win: Gtk.Window) -> None:
-        gfile = Gio.File.new_for_uri(nav_uri)
-        dialog = Gtk.AppChooserDialog.new(win, Gtk.DialogFlags.MODAL, gfile)
-        dialog.connect("response", lambda d, _: d.destroy())
-        dialog.present()
-
     def _do_properties(self, nav_uri: str, win: Gtk.Window) -> None:
         uri = nav_uri
 
@@ -2251,7 +2139,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             return
 
         pref_win = Adw.PreferencesDialog()
-        pref_win.set_title(_(PREFS_WIN_TITLE))
+        pref_win.set_title(PREFS_WIN_TITLE)
         pref_win.set_search_enabled(False)
 
         page = Adw.PreferencesPage()
@@ -2346,41 +2234,6 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         mode_row.connect("notify::selected", _on_mode_changed)
         _update_color_rows(mode_row.get_selected())
-
-        bookmark_group = Adw.PreferencesGroup()
-        bookmark_group.set_title(_("Sidebar Bookmark"))
-        bookmark_group.set_description(
-            _(
-                'The "Computer" bookmark gives access to this panel from the sidebar.'
-                " Restore it here if you accidentally removed it."
-            )
-        )
-        page.add(bookmark_group)
-
-        def _bookmark_exists() -> bool:
-            if not os.path.exists(BOOKMARKS_FILE):
-                return False
-            with open(BOOKMARKS_FILE) as f:
-                return any(line.split(None, 1)[0] == DISKS_URI for line in f if line.strip())
-
-        bookmark_row = Adw.ActionRow()
-        bookmark_row.set_title(_('Restore "Computer" bookmark'))
-        restore_btn = Gtk.Button(label=_("Restore"))
-        restore_btn.get_style_context().add_class("pill")
-        restore_btn.set_valign(Gtk.Align.CENTER)
-        restore_btn.set_sensitive(not _bookmark_exists())
-
-        def _on_restore_bookmark(*_args) -> None:
-            _ensure_bookmark()
-            restore_btn.set_sensitive(False)
-            restore_btn.set_label(_("Added ✓"))
-            GLib.idle_add(
-                lambda: [self._fix_sidebar_icon(w) for w in list(self._windows)] and False
-            )
-
-        restore_btn.connect("clicked", _on_restore_bookmark)
-        bookmark_row.add_suffix(restore_btn)
-        bookmark_group.add(bookmark_row)
 
         about_group = Adw.PreferencesGroup()
         about_group.set_title(_("About"))
@@ -2478,142 +2331,211 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         )
         return False
 
-    # ── Chrome icon fix (sidebar row + path bar chip) ────────────────────────
+    # ── Chrome icon fix (path bar chip) ─────────────────────────────────────
 
-    @staticmethod
-    def _sidebar_row_destination(row) -> str | None:
-        """Return the sidebar row's destination URI, if the row exposes one.
+    def _inject_sidebar_link(self, win: Gtk.Window) -> bool:
+        """Prototype: inject a dummy 'My Computer' row above NautilusSidebar.
 
-        The bookmark row is created by Nautilus from the GTK bookmarks file, so
-        we do not control its widget ids. The stable identifier we *do* control
-        is the bookmark destination URI (`computer:///`). Cache the working
-        property name per row class to avoid repeated exception-driven probing.
-        """
-        cls = type(row).__name__
-        prop_cache = _sidebar_row_destination_prop_cache  # module-level dict
-        known_prop = prop_cache.get(cls)  # None = unknown, False = no property
-        if known_prop is not False:
-            for prop in [known_prop] if known_prop else ("uri", "location"):
-                try:
-                    val = row.get_property(prop)
-                    if known_prop is None:
-                        prop_cache[cls] = prop  # remember what works
-                    if isinstance(val, Gio.File):
-                        return val.get_uri().rstrip("/")
-                    if isinstance(val, str) and val:
-                        return val.rstrip("/")
-                    return None
-                except Exception:
-                    pass
-            if known_prop is None:
-                prop_cache[cls] = False  # no URI property found for this type
-        return None
-
-    @classmethod
-    def _sidebar_row_is_ours(cls, row) -> bool:
-        """True if *row* points to DISKS_URI, independent of bookmark label."""
-        return cls._sidebar_row_destination(row) == DISKS_URI.rstrip("/")
-
-    @staticmethod
-    def _widget_has_button_ancestor(widget, stop) -> bool:
-        parent = widget.get_parent() if widget else None
-        while parent and parent is not stop:
-            if isinstance(parent, Gtk.Button):
-                return True
-            parent = parent.get_parent()
-        return False
-
-    def _find_sidebar_row_icon(self, row):
-        """Return the leading icon widget for a matched sidebar row.
-
-        We do not control NautilusSidebarRow construction, so we cannot attach a
-        buildable_id to our bookmark row. Instead, identify the row by URI/label,
-        then locate the icon structurally relative to the row's primary label:
-        walk from that label upward and look for a sibling branch before it that
-        contains an image outside any button subtree. This avoids relying on the
-        first Gtk.Image in the whole row.
-        """
-
-        label = next(
-            (
-                w
-                for w in _all_widgets(row)
-                if isinstance(w, Gtk.Label)
-                and (w.get_label() or "").strip()
-                and not self._widget_has_button_ancestor(w, row)
-            ),
-            None,
-        )
-
-        def _find_image_in_branch(root):
-            for w in _all_widgets(root):
-                if not isinstance(w, Gtk.Image):
-                    continue
-                if self._widget_has_button_ancestor(w, row):
-                    continue
-                return w
-            return None
-
-        if label is not None:
-            branch = label
-            container = label.get_parent()
-            while container and container is not row:
-                for child in _iter_children(container):
-                    if child is branch:
-                        break
-                    image = _find_image_in_branch(child)
-                    if image is not None:
-                        return image
-                branch = container
-                container = container.get_parent()
-
-        return _find_image_in_branch(row)
-
-    def _fix_sidebar_icon(self, win: Gtk.Window) -> bool:
-        """Pin the COMPUTER_ICON on our sidebar bookmark row.
-
-        Matches by destination URI (DISKS_URI) so renaming the bookmark does not
-        break the icon. Nautilus assigns computer:/// a folder-remote-symbolic
-        gicon, so content-based detection never matches — hence _pin_icon.
-        The bookmark row itself is created by Nautilus, so we cannot add our own
-        buildable_id to it; the stable identity we control is the destination URI.
-        Once the row is matched, locate the leading icon structurally relative to
-        the row label instead of pinning the first Gtk.Image in the subtree.
+        Wraps NautilusSidebar in a vertical GtkBox (our_row + NautilusSidebar) and
+        sets that as the AdwToolbarView content. Our row is a direct sibling of
+        NautilusSidebar, outside the GtkListBox that update_places() clears.
+        One-time injection per window; no re-injection needed.
         """
         split_view = next(
             (w for w in _all_widgets(win) if isinstance(w, Adw.OverlaySplitView)), None
         )
-        sidebar_root = split_view.get_sidebar() if split_view else None
-        if not sidebar_root:
+        sidebar_toolbar = split_view.get_sidebar() if split_view else None
+        if not isinstance(sidebar_toolbar, Adw.ToolbarView):
+            _log(
+                f"_inject_sidebar_link: expected AdwToolbarView from get_sidebar(), "
+                f"got {type(sidebar_toolbar).__name__ if sidebar_toolbar else 'None'}"
+            )
             return False
 
-        nav_box = _find_widget(
-            sidebar_root,
-            css_class="navigation-sidebar",
-            site="_fix_sidebar_icon",
+        nautilus_sidebar = sidebar_toolbar.get_content()
+        if nautilus_sidebar is None:
+            _log("_inject_sidebar_link: AdwToolbarView content is None")
+            return False
+
+        _log(f"_inject_sidebar_link: content={type(nautilus_sidebar).__name__}")
+
+        # Try to instantiate NautilusSidebarRow directly from the Nautilus GObject
+        # type system. It is registered at runtime when Nautilus loads, so
+        # GObject.type_from_name() can find it. uri is construct-only.
+        our_listbox = Gtk.ListBox()
+        our_listbox.set_name("my_computer_list")
+        our_listbox.add_css_class("navigation-sidebar")
+        our_listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
+
+        list_row = None
+        try:
+            row_gtype = GObject.type_from_name("NautilusSidebarRow")
+            list_row = GObject.new(
+                row_gtype,
+                **{
+                    "uri": DISKS_URI,
+                    "place-type": 1,  # NAUTILUS_SIDEBAR_ROW_BUILT_IN
+                    "section-type": 1,  # NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS
+                },
+            )
+            list_row.set_name("my_computer")
+            list_row.set_property("label", _LOCATION_TITLE)
+            list_row.set_property("eject-tooltip", _("Unmount"))
+            list_row.set_has_tooltip(True)
+            list_row.set_tooltip_text(_("Open My Computer"))
+            _log(f"_inject_sidebar_link: NautilusSidebarRow created ✓ (uri={DISKS_URI})")
+        except Exception as e:
+            _log(f"_inject_sidebar_link: NautilusSidebarRow unavailable ({e}), using GtkListBoxRow")
+
+        if list_row is None:
+            list_row = Gtk.ListBoxRow()
+            list_row.set_name("my_computer")
+            row_revealer = Gtk.Revealer()
+            row_revealer.set_name("my_computer_revealer")
+            row_revealer.set_reveal_child(True)
+            row_revealer.set_transition_type(Gtk.RevealerTransitionType.NONE)
+            row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+            row_box.set_name("my_computer_box")
+            icon = Gtk.Image.new_from_icon_name(COMPUTER_ICON)
+            icon.set_name("my_computer_icon")
+            icon.set_icon_size(Gtk.IconSize.NORMAL)
+            label = Gtk.Label(label=_LOCATION_TITLE)
+            label.set_name("my_computer_label")
+            label.set_xalign(0.0)
+            label.set_hexpand(True)
+            row_box.append(icon)
+            row_box.append(label)
+            row_revealer.set_child(row_box)
+            list_row.set_child(row_revealer)
+
+        our_listbox.append(list_row)
+        our_listbox.connect(
+            "row-activated",
+            lambda _lb, _row: self._navigate_to(DISKS_URI, win),
         )
 
-        found = False
-        if nav_box is not None:
-            row = nav_box.get_first_child()
-            while row:
-                if self._sidebar_row_is_ours(row):
-                    image = self._find_sidebar_row_icon(row)
-                    if image is not None:
-                        _pin_icon(image, COMPUTER_ICON)
-                        found = True
-                row = row.get_next_sibling()
-        else:
-            for row in _all_widgets(sidebar_root):
-                if type(row).__name__ != "NautilusSidebarRow":
+        def _pin_row_icon():
+            for w in _all_widgets(list_row):
+                if not isinstance(w, Gtk.Image):
                     continue
-                if self._sidebar_row_is_ours(row):
-                    image = self._find_sidebar_row_icon(row)
-                    if image is not None:
-                        _pin_icon(image, COMPUTER_ICON)
-                        found = True
+                parent = w.get_parent()
+                in_button = False
+                while parent and parent is not list_row:
+                    if isinstance(parent, Gtk.Button):
+                        in_button = True
+                        break
+                    parent = parent.get_parent()
+                if not in_button:
+                    _pin_icon(w, COMPUTER_ICON)
+                    break
+            return GLib.SOURCE_REMOVE
 
-        return found
+        GLib.idle_add(_pin_row_icon)
+
+        def _on_computer_right_clicked(gesture, _n, x, y):
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+
+            on_computer = self._windows.get(win, {}).get("visible_child") == STACK_DISKINFO
+
+            menu = Gio.Menu()
+            ag = Gio.SimpleActionGroup()
+
+            primary = Gio.Menu()
+            primary.append(_("Open"), "comprow.open")
+            primary.append(_("Open in New Tab"), "comprow.open-tab")
+            primary.append(_("Open in New Window"), "comprow.open-window")
+            menu.append_section(None, primary)
+
+            settings_section = Gio.Menu()
+            settings_section.append(MENU_ITEM_LABEL, "comprow.settings")
+            menu.append_section(None, settings_section)
+
+            open_act = Gio.SimpleAction.new("open", None)
+            open_act.set_enabled(not on_computer)
+            open_act.connect("activate", lambda *_: self._do_open(DISKS_URI, win))
+            ag.add_action(open_act)
+
+            tab_act = Gio.SimpleAction.new("open-tab", None)
+            tab_act.connect("activate", lambda *_: self._do_open_tab(DISKS_URI, win))
+            ag.add_action(tab_act)
+
+            win_act = Gio.SimpleAction.new("open-window", None)
+            win_act.connect("activate", lambda *_: self._do_open_window(DISKS_URI))
+            ag.add_action(win_act)
+
+            settings_act = Gio.SimpleAction.new("settings", None)
+            settings_act.connect("activate", lambda *_: self._launch_prefs(win))
+            ag.add_action(settings_act)
+
+            list_row.insert_action_group("comprow", ag)
+
+            popover = Gtk.PopoverMenu.new_from_model(menu)
+            popover.set_has_arrow(False)
+            popover.set_parent(list_row)
+            rect = Gdk.Rectangle()
+            rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+            popover.set_pointing_to(rect)
+            popover.popup()
+
+        right_click = Gtk.GestureClick()
+        right_click.set_button(3)
+        right_click.connect("pressed", _on_computer_right_clicked)
+        our_listbox.add_controller(right_click)
+
+        # Hide the eject button — not applicable for the Computer entry.
+        btn = _find_widget(list_row, buildable_id="eject_button")
+        if isinstance(btn, Gtk.Button):
+            btn.set_visible(False)
+
+        wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+
+        outer_scroll = Gtk.ScrolledWindow()
+        outer_scroll.set_vexpand(True)
+        outer_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        outer_scroll.set_child(wrapper)
+
+        # set_content() unparents nautilus_sidebar; then we can append it to wrapper.
+        sidebar_toolbar.set_content(outer_scroll)
+        wrapper.append(our_listbox)
+        wrapper.append(nautilus_sidebar)
+
+        # Disable NautilusSidebar's own scroll so it expands to full height
+        # and our outer_scroll drives all scrolling.
+        native_listbox = None
+        for w in _all_widgets(nautilus_sidebar):
+            if isinstance(w, Gtk.ScrolledWindow):
+                w.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
+                w.set_margin_top(0)
+                _log("_inject_sidebar_link: inner scroll disabled ✓")
+            elif isinstance(w, Gtk.ListBox):
+                native_listbox = w
+
+        nautilus_sidebar.set_margin_top(0)
+        our_listbox.set_margin_bottom(0)
+        if native_listbox is not None:
+            native_listbox.set_margin_top(0)
+            native_listbox.add_css_class("places-sidebar-list")
+
+        # Cross-deselect: selecting in one listbox clears the other so only
+        # one row appears selected across both groups at any time.
+        if native_listbox is not None:
+            our_listbox.connect(
+                "row-selected",
+                lambda _lb, row: native_listbox.unselect_all() if row else None,
+            )
+            native_listbox.connect(
+                "row-selected",
+                lambda _lb, row: our_listbox.unselect_all() if row else None,
+            )
+            _log("_inject_sidebar_link: cross-deselect wired ✓")
+
+        state = self._windows.get(win)
+        if state is not None:
+            state["sidebar_listbox"] = our_listbox
+            state["sidebar_row"] = list_row
+
+        _log("_inject_sidebar_link: outer scroll wrapper set as content ✓")
+        return True
 
     def _attach_pathbar(self, win: Gtk.Window) -> bool:
         """Locate the path bar and cache it. If found, installs watchers to
@@ -2677,7 +2599,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
     def _subscribe_pathbar_labels(self, pathbar) -> None:
         """Connect notify::label on every GtkLabel inside *pathbar*."""
-        target_labels = {BOOKMARK_LABEL, BOOKMARK_LABEL_LOCAL, _LOCATION_TITLE}
+        target_labels = {COMPUTER_LABEL, _LOCATION_TITLE}
         for w in _all_widgets(pathbar):
             if isinstance(w, Gtk.Label) and not getattr(w, "_diskinfo_label_watched", False):
                 w._diskinfo_label_watched = True
@@ -2692,12 +2614,12 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
     def _fix_pathbar_icon(self, pathbar_or_win) -> bool:
         """Search within the given root widget for any GtkLabel showing
-        BOOKMARK_LABEL or _LOCATION_TITLE inside a path-bar-like structure.
+        COMPUTER_LABEL or _LOCATION_TITLE inside a path-bar-like structure.
         Ensures a computer-symbolic icon is present and pinned."""
         if pathbar_or_win is None:
             return False
 
-        target_labels = {BOOKMARK_LABEL, BOOKMARK_LABEL_LOCAL, _LOCATION_TITLE}
+        target_labels = {COMPUTER_LABEL, _LOCATION_TITLE}
         for w in _all_widgets(pathbar_or_win):
             if not isinstance(w, Gtk.Label):
                 continue

@@ -256,11 +256,11 @@ def _build_uuid_map() -> dict[str, str]:
 
 
 def _classify_mount(m: MountInfo) -> str:
-    """Return 'system', 'external', 'removable', or 'network' for a mount entry."""
+    """Return 'local', 'removable', 'disc', or 'network' for a mount entry."""
     # Unmounted volumes are never part of the running system.
-    # Removable (USB, optical) → "Removable Devices"; others → "Devices and Drives"
+    # Removable (USB, optical) → "Removable Devices"; others → "On this computer"
     if not m.is_mounted:
-        return "removable" if m.is_removable else "external"
+        return "removable" if m.is_removable else "local"
 
     # GVfs mounts — phones/cameras (MTP, PTP) go to removable; rest are network
     if m.is_gio:
@@ -272,23 +272,36 @@ def _classify_mount(m: MountInfo) -> str:
     if m.fstype in OPTICAL_FSTYPES:
         return "disc"
 
-    # Removable-media paths always → check removable flag first, then external.
+    # Removable-media paths always → check removable flag first, then local.
     # This ensures NTFS/fuseblk drives at /run/media/ are not misclassified
     # as network just because their fstype starts with "fuse".
     if any(m.mountpoint.startswith(p) for p in EXTERNAL_PREFIXES):
-        return "removable" if m.is_removable else "external"
+        return "removable" if m.is_removable else "local"
 
     # x-gvfs-show fstab entries and known network fstypes → network
     if "x-gvfs-show" in m.opts or m.fstype in NETWORK_FSTYPES or m.fstype.startswith("fuse"):
         return "network"
 
-    return "system"
+    return "local"
+
+
+def _get_local_mount_tier(m: MountInfo) -> tuple[int, str]:
+    """Return (tier, name) for hierarchical sorting within 'local' group.
+    Tier: 0=root, 1=system partitions, 2=mounted, 3=unmounted
+    Used by 'sort by type' mode."""
+    name = (m.display_name or "").lower()
+    if m.mountpoint == "/":
+        return (0, name)
+    if m.mountpoint in ("/boot", "/boot/efi", "/efi") or m.fstype == "swap":
+        return (1, name)
+    if m.is_mounted:
+        return (2, name)
+    return (3, name)
 
 
 # Icon per group category
 _GROUP_ICON = {
-    "system": "drive-harddisk",
-    "external": "drive-harddisk",
+    "local": "drive-harddisk",
     "removable": "drive-removable-media",
     "disc": "media-optical",
     "network": "folder-remote",
@@ -296,8 +309,7 @@ _GROUP_ICON = {
 
 # Display names and order for the groups
 _GROUPS: list[tuple[str, str]] = [
-    ("system", "System"),
-    ("external", "Devices and Drives"),
+    ("local", "On this computer"),
     ("removable", "Removable Devices"),
     ("disc", "Disc Images"),
     ("network", "Network Volumes"),
@@ -1578,8 +1590,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         # Classify
         by_group: dict[str, list] = {
-            "system": [],
-            "external": [],
+            "local": [],
             "removable": [],
             "disc": [],
             "network": [],
@@ -1598,21 +1609,20 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         def _sort_key(m: MountInfo):
             if col == "size":
                 return m.total
-            elif col == "type":
-                return m.fstype
             else:
                 return (m.display_name or "").lower()
 
-        for gkey in ("system", "external", "removable", "disc", "network"):
+        for gkey in ("local", "removable", "disc", "network"):
             items = by_group[gkey]
-            if gkey == "system":
-                root_items = [m for m in items if m.mountpoint == "/"]
-                mounted_items = [m for m in items if m.mountpoint != "/" and m.is_mounted]
-                unmounted = [m for m in items if not m.is_mounted]
-                mounted_items.sort(key=_sort_key, reverse=rev)
-                unmounted.sort(key=_sort_key, reverse=rev)
-                by_group[gkey] = root_items + mounted_items + unmounted
-            elif gkey in ("external", "removable"):
+            if gkey == "local":
+                if col == "type":
+                    # Sort by type: root → system partitions → mounted → unmounted
+                    items.sort(key=_get_local_mount_tier, reverse=False)
+                else:
+                    # Natural alphabetical sort (name) or by size: no type filtering
+                    items.sort(key=_sort_key, reverse=rev)
+                by_group[gkey] = items
+            elif gkey == "removable":
                 mounted_items = [m for m in items if m.is_mounted]
                 unmounted = [m for m in items if not m.is_mounted]
                 mounted_items.sort(key=_sort_key, reverse=rev)
@@ -1931,14 +1941,13 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         mount_key = getattr(row, "_mount_key", None)
         m = _disk_data.get(mount_key) if mount_key else None
         nav_uri = getattr(row, "_nav_uri", "")
-        group = getattr(row, "_disk_group", "system")
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
 
         if not m:
             return
 
         is_mounted = m.is_mounted
-        is_system = group == "system"
+        is_system = m.mountpoint == "/"
         device = m.device or ""
         if not device.startswith("/dev/") and m.gio_volume:
             unix_dev = m.gio_volume.get_identifier(Gio.VOLUME_IDENTIFIER_KIND_UNIX_DEVICE)

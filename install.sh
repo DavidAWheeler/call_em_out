@@ -144,7 +144,7 @@ fetch_latest_version() {
 
 # ─── Validate user-specified VERSION exists on GitHub ────────────────────────
 validate_ref() {
-    [ -n "$REF_OVERRIDE" ] || return
+    [ -z "$REF_OVERRIDE" ] && return
     local status
     status=$(curl -s -o /dev/null -w "%{http_code}" \
         "https://raw.githubusercontent.com/$REPO/$LATEST/$EXT_FILE")

@@ -976,7 +976,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             attempts[0] += 1
             # Hold off until the widget tree exists AND the first load has
             # settled (title resolved to a real location, not "Loading…").
-            if _is_unsettled_title(win.get_title() or ""):
+            # Also enforce a minimum delay of at least 25 attempts (500ms) to ensure
+            # Nautilus has finished loading the window layout, popovers, and menus.
+            if _is_unsettled_title(win.get_title() or "") or attempts[0] < 25:
                 if attempts[0] > _WIN_INIT_MAX_ATTEMPTS:
                     # Window never settled (rare) — inject anyway so the
                     # extension still works; route through the low-prio idle.

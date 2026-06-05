@@ -25,7 +25,11 @@
 ### Quick install (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yannmasoch/nautilus-my-computer/main/install.sh | bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/yannmasoch/nautilus-my-computer/main/install.sh)"
+```
+### Install specific version from another branch
+```bash
+VERSION=[branch_name] bash -c "$(curl -fsSL https://raw.githubusercontent.com/yannmasoch/nautilus-my-computer/main/install.sh)"
 ```
 
 ### Manual install from a local clone

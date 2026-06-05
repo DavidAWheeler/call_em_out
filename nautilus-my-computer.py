@@ -72,6 +72,7 @@ DBUS_PATH_FILE_MANAGER = "/org/freedesktop/FileManager1"
 # below are one-shot retry/debounce intervals, not continuous poll periods.
 _REFRESH_DEBOUNCE_MS = 300  # coalesce rapid mount/unmount/plug events
 _WIN_INIT_RETRY_MS = 20  # retry interval while waiting for NautilusWindow widget tree
+_WIN_INIT_MAX_ATTEMPTS = 100  # ~2 s budget waiting for the first view load to settle
 _NAV_RETRY_MS = 60  # retry interval while navigating to computer:///
 _TAB_WAIT_MS = 50  # retry interval while waiting for a new tab slot
 _USAGE_GATE_MS = 1000  # idle cadence: try a statvfs sweep this often, skip while disk is busy
@@ -854,7 +855,6 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         self._nautilus_prefs = None  # Gio.Settings for org.gnome.nautilus.preferences
         self._bar_css_provider = Gtk.CssProvider()
         self._bar_css_display = None
-        self._bar_seq = 0
 
         self._gsettings = _get_gsettings()
         if self._gsettings:
@@ -915,7 +915,23 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         return False
 
     def _on_window_added(self, _app, win: Gtk.Window) -> None:
-        """Instant handler for new Nautilus windows — retries until widget tree is ready."""
+        """Instant handler for new Nautilus windows — defers injection until load settles."""
+        self._schedule_window_init(win)
+
+    def _schedule_window_init(self, win: Gtk.Window) -> None:
+        """Wait for the window's first view load to settle, then inject on a
+        low-priority idle.
+
+        Injecting our Gtk.Stack reparents the AdwToolbarView content. Doing that
+        during Nautilus's files_view_begin_loading races with its templates
+        context-menu rebuild: with a non-empty ~/Templates,
+        slot_on_templates_menu_changed rebuilds a GtkPopoverMenu whose internal
+        GtkStack our tree surgery destabilises, hitting a Nautilus-core
+        use-after-free that segfaults on GTK 4.22 / GNOME 50 (GTK_IS_STACK
+        assertion → SIGSEGV). Deferring until the load has finished, and running
+        the injection at PRIORITY_LOW (after Nautilus's loading idles drain),
+        removes the overlap. See issue #4. Empty ~/Templates never triggers it.
+        """
         if not _is_nautilus_window(win) or win in self._windows:
             return
         attempts = [0]
@@ -923,14 +939,26 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         def _try() -> bool:
             if win in self._windows:
                 return GLib.SOURCE_REMOVE
-            if self._init_window(win):
-                return GLib.SOURCE_REMOVE
             attempts[0] += 1
-            if attempts[0] > 25:  # ~500 ms budget
-                return GLib.SOURCE_REMOVE
-            return GLib.SOURCE_CONTINUE
+            # Hold off until the widget tree exists AND the first load has
+            # settled (title resolved to a real location, not "Loading…").
+            if _is_unsettled_title(win.get_title() or ""):
+                if attempts[0] > _WIN_INIT_MAX_ATTEMPTS:
+                    # Window never settled (rare) — inject anyway so the
+                    # extension still works; route through the low-prio idle.
+                    GLib.idle_add(self._deferred_init_window, win, priority=GLib.PRIORITY_LOW)
+                    return GLib.SOURCE_REMOVE
+                return GLib.SOURCE_CONTINUE
+            GLib.idle_add(self._deferred_init_window, win, priority=GLib.PRIORITY_LOW)
+            return GLib.SOURCE_REMOVE
 
         GLib.timeout_add(_WIN_INIT_RETRY_MS, _try)
+
+    def _deferred_init_window(self, win: Gtk.Window) -> bool:
+        """Low-priority idle wrapper around _init_window (always one-shot)."""
+        if win not in self._windows and _is_nautilus_window(win):
+            self._init_window(win)
+        return GLib.SOURCE_REMOVE
 
     def _init_window(self, win: Gtk.Window) -> bool:
         css = Gtk.CssProvider()
@@ -951,6 +979,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             self._inject_sidebar_link(win)
             self._attach_pathbar(win)
             self._on_title_changed(win, None)
+
             return True
         return False
 
@@ -960,7 +989,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         for win in toplevels:
             if _is_nautilus_window(win) and win not in self._windows:
                 found_any = True
-                self._init_window(win)
+                # Route through the deferred path: a window present at
+                # extension-load time may still be mid-load (see issue #4).
+                self._schedule_window_init(win)
         if toplevels and not found_any and not self._windows:
             names = [type(w).__name__ for w in toplevels]
             _log(f"check_new_windows: no NautilusWindow found among {names} — class renamed?")
@@ -1023,23 +1054,15 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         elif mode == "gradient":
             c1 = self._gsettings.get_string("gradient-color-1")
             c2 = self._gsettings.get_string("gradient-color-2")
-            # Gradient on block.filled, sized to the full trough width via background-size.
-            # For fill ratio v, background-size=(100/v)% makes the gradient span 100% of
-            # background-size:(100/v)% scales the gradient to the full trough width.
-            # block.filled (width=v×trough) acts as a reveal window anchored at left.
-            rules = [
-                f".diskinfo-bar block.filled {{"
-                f" background-image: linear-gradient(to right, {c1} 20%, {c2} 100%);"
-                f" background-position: left center; background-repeat: no-repeat; }}"
-            ]
-            for st in self._windows.values():
-                for bname, v in st.get("bar_geom", {}).items():
-                    if v > 0:
-                        pct = 100.0 / v
-                        rules.append(
-                            f"#{bname} block.filled {{ background-size: {pct:.4f}% 100%; }}"
-                        )
-            css = "".join(rules).encode()
+            # Use CSS :dir() so GTK resolves direction per-widget at render time.
+            # Gradient spans the filled area directly — no background-size trickery,
+            # which is unreliable on older GTK4 (e.g. Ubuntu 22.04 / GTK 4.6.x).
+            css = (
+                f".diskinfo-bar:dir(ltr) block.filled {{"
+                f" background: linear-gradient(to right, {c1} 20%, {c2} 100%); }}"
+                f".diskinfo-bar:dir(rtl) block.filled {{"
+                f" background: linear-gradient(to left, {c1} 20%, {c2} 100%); }}"
+            ).encode()
         else:
             css = b".diskinfo-bar block.filled { background: @accent_bg_color; }"
         self._bar_css_provider.load_from_data(css)
@@ -1509,7 +1532,6 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         grid_box = self._new_grid_box()
         section_flows: list[Gtk.FlowBox] = []
         card_widgets = {}
-        bar_geom = {}
 
         # Classify
         by_group: dict[str, list] = {
@@ -1588,7 +1610,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             container.connect("selected-children-changed", self._on_flow_selection_changed, win)
             section_flows.append(container)
             for m in items:
-                card = self._build_disk_card(m, group_key, win, card_widgets, bar_geom)
+                card = self._build_disk_card(m, group_key, win, card_widgets)
                 size_group.add_widget(card)
                 container.append(card)
 
@@ -1600,7 +1622,6 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                 grid_box.append(container)
 
         old_grid_box = state.get("grid_box")
-        state["bar_geom"] = bar_geom
         state["grid_box"] = grid_box
         state["section_flows"] = section_flows
         state["card_widgets"] = card_widgets
@@ -1611,7 +1632,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         self._apply_bar_color()
 
     def _build_disk_card(
-        self, m: MountInfo, group_key: str, win: Gtk.Window, card_widgets: dict, bar_geom: dict
+        self, m: MountInfo, group_key: str, win: Gtk.Window, card_widgets: dict
     ) -> Gtk.Widget:
         nav_uri = m.nav_uri or (
             Gio.File.new_for_path(m.mountpoint).get_uri() if m.mountpoint else ""
@@ -1664,11 +1685,6 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             v = min(m.percent / 100.0, 1.0)
             bar.set_value(v)
             bar.set_visible(True)
-            self._bar_seq += 1
-            bname = f"diskbar{self._bar_seq}"
-            bar.set_name(bname)
-            if v > 0:
-                bar_geom[bname] = v
             sub_text = _("{free} free of {total}").format(
                 free=_format_size(m.free), total=_format_size(m.total)
             )

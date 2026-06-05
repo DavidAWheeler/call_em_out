@@ -23,17 +23,25 @@ This roadmap reflects planned fixes, features, and improvements. It is subject t
 - chore: remove Restore Bookmark button from preferences
 - refactor: remove dead code (hamburger menu helpers, orphaned functions)
 
-## v0.3.1 — Translations
+## v0.3.1 — Bug fixes
+- fix: startup crash when ~/Templates is non-empty (issue #4)
+- fix: RTL gradient direction now resolved by CSS engine via `:dir()` instead of Python-level locale detection (credit @e6ad2020)
+- i18n: Arabic translation for Disc Images group (credit @e6ad2020)
+
+## v0.3.2 — Translations
 - feat: add Italian, Spanish and Portuguese translations
 
-## v0.3.2 — Disk cards bug fixes
+## v0.3.3 — Disk cards bug fixes
 - fix: disk cards not always updating during file transfers
 - fix: disk cards not updating when drives are connected or disconnected
 
-## v0.3.3 — UX
+## v0.3.4 — UX
 - UX: reduce space between group label and cards
 - UX: improve linear template for list view
 - UX: adjust top margin of Computer button
+
+## v0.3.5 — Gradient compatibility fix
+- fix: gradient color mode not rendering on GTK 4.6.x (Ubuntu 22.04 LTS and similar)
 
 ## Upcoming
 Contributions, suggestions or languages welcome via Issues.

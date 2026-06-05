@@ -30,6 +30,7 @@ tmp/
 Thumbs.db
 
 # Generated/build artifacts
+.ruff_cache/
 gschemas.compiled
 *.mo
 *.egg-info/

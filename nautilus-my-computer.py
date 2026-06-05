@@ -191,7 +191,7 @@ class MountInfo:
 
     # Flags
     is_gio: bool = False
-    is_unmounted: bool = False
+    is_mounted: bool = True
     is_removable: bool = False
     can_eject: bool = False
     is_network_place: bool = False
@@ -259,7 +259,7 @@ def _classify_mount(m: MountInfo) -> str:
     """Return 'system', 'external', 'removable', or 'network' for a mount entry."""
     # Unmounted volumes are never part of the running system.
     # Removable (USB, optical) → "Removable Devices"; others → "Devices and Drives"
-    if m.is_unmounted:
+    if not m.is_mounted:
         return "removable" if m.is_removable else "external"
 
     # GVfs mounts — phones/cameras (MTP, PTP) go to removable; rest are network
@@ -615,7 +615,7 @@ def _scan_gio_volumes() -> list[MountInfo]:
                     free=0,
                     display_name=name,
                     nav_uri="",
-                    is_unmounted=True,
+                    is_mounted=False,
                     is_removable=is_removable,
                     gio_icon=volume.get_icon(),
                     gio_volume=volume,
@@ -1273,7 +1273,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         the main thread in _apply_usage_updates via dataclasses.replace)."""
         updates: dict[str, tuple[int, int]] = {}
         for key, m in list(_disk_data.items()):
-            if m.is_gio or m.is_unmounted or not m.mountpoint:
+            if m.is_gio or not m.is_mounted or not m.mountpoint:
                 continue
             try:
                 st = os.statvfs(m.mountpoint)
@@ -1607,14 +1607,14 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             items = by_group[gkey]
             if gkey == "system":
                 root_items = [m for m in items if m.mountpoint == "/"]
-                mounted_items = [m for m in items if m.mountpoint != "/" and not m.is_unmounted]
-                unmounted = [m for m in items if m.is_unmounted]
+                mounted_items = [m for m in items if m.mountpoint != "/" and m.is_mounted]
+                unmounted = [m for m in items if not m.is_mounted]
                 mounted_items.sort(key=_sort_key, reverse=rev)
                 unmounted.sort(key=_sort_key, reverse=rev)
                 by_group[gkey] = root_items + mounted_items + unmounted
             elif gkey in ("external", "removable"):
-                mounted_items = [m for m in items if not m.is_unmounted]
-                unmounted = [m for m in items if m.is_unmounted]
+                mounted_items = [m for m in items if m.is_mounted]
+                unmounted = [m for m in items if not m.is_mounted]
                 mounted_items.sort(key=_sort_key, reverse=rev)
                 unmounted.sort(key=_sort_key, reverse=rev)
                 by_group[gkey] = mounted_items + unmounted
@@ -1683,7 +1683,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         card.get_style_context().add_class("nautilus-view-cell")
-        if m.is_unmounted:
+        if not m.is_mounted:
             card.get_style_context().add_class("unmounted")
         card.set_margin_start(6)
         card.set_margin_end(6)
@@ -1720,7 +1720,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         bar.get_style_context().add_class("diskinfo-bar")
 
         has_size = m.total > 0
-        if m.is_unmounted:
+        if not m.is_mounted:
             bar.set_visible(False)
             sub_text = _("Not mounted")
         elif has_size:
@@ -1777,7 +1777,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         mount_key = getattr(card, "_mount_key", None)
         m = _disk_data.get(mount_key) if mount_key else None
         nav_uri = getattr(card, "_nav_uri", "")
-        if m and m.is_unmounted:
+        if m and not m.is_mounted:
             self._do_mount(m, win)
             return
         GLib.idle_add(self._navigate_to, nav_uri, win)
@@ -1896,22 +1896,22 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         mount_key = getattr(row, "_mount_key", None)
         m = _disk_data.get(mount_key) if mount_key else None
         nav_uri = getattr(row, "_nav_uri", "")
-        is_unmounted = m.is_unmounted if m else False
+        is_mounted = m.is_mounted if m else True
         ctrl_held = bool(state & Gdk.ModifierType.CONTROL_MASK)
         shift_held = bool(state & Gdk.ModifierType.SHIFT_MASK)
         alt_held = bool(state & Gdk.ModifierType.ALT_MASK)
 
         if alt_held and not ctrl_held and not shift_held:
-            if not is_unmounted and nav_uri:
+            if is_mounted and nav_uri:
                 self._do_properties(nav_uri, win)
         elif ctrl_held and not shift_held and not alt_held:
-            if not is_unmounted:
+            if is_mounted:
                 self._do_open_tab(nav_uri, win)
         elif shift_held and not ctrl_held and not alt_held:
-            if not is_unmounted:
+            if is_mounted:
                 self._do_open_window(nav_uri)
         else:
-            if is_unmounted:
+            if not is_mounted:
                 self._do_mount(m, win)
             else:
                 self._do_open(nav_uri, win)
@@ -1934,9 +1934,16 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         group = getattr(row, "_disk_group", "system")
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
 
-        is_unmounted = m.is_unmounted if m else False
-        can_eject = m.can_eject if m else False
+        if not m:
+            return
+
+        is_mounted = m.is_mounted
         is_system = group == "system"
+        device = m.device or ""
+        if not device.startswith("/dev/") and m.gio_volume:
+            unix_dev = m.gio_volume.get_identifier(Gio.VOLUME_IDENTIFIER_KIND_UNIX_DEVICE)
+            if unix_dev:
+                device = unix_dev
 
         def _accel_item(label, action, accel):
             item = Gio.MenuItem.new(label, action)
@@ -1946,76 +1953,74 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         menu = Gio.Menu()
         ag = Gio.SimpleActionGroup()
 
-        # Section 1: primary action(s) — open for mounted, mount for unmounted
-        primary_section = Gio.Menu()
-        if is_unmounted:
-            if not is_system:
-                primary_section.append(_("Mount"), "diskrow.mount")
+        # Section 1: open actions (all disks)
+        open_sec = Gio.Menu()
+        open_sec.append_item(_accel_item(_("Open"), "diskrow.open", "Return"))
+        open_sec.append_item(
+            _accel_item(_("Open in New Tab"), "diskrow.open-tab", "<Control>Return")
+        )
+        open_sec.append_item(
+            _accel_item(_("Open in New Window"), "diskrow.open-window", "<Shift>Return")
+        )
+        menu.append_section(None, open_sec)
+
+        open_act = Gio.SimpleAction.new("open", None)
+        if is_mounted and nav_uri:
+            open_act.connect("activate", lambda *_: self._do_open(nav_uri, win))
+        else:
+            open_act.connect("activate", lambda *_: self._do_mount_then_open(m, win, "current"))
+        ag.add_action(open_act)
+        tab_act = Gio.SimpleAction.new("open-tab", None)
+        if is_mounted and nav_uri:
+            tab_act.connect("activate", lambda *_: self._do_open_tab(nav_uri, win))
+        else:
+            tab_act.connect("activate", lambda *_: self._do_mount_then_open(m, win, "tab"))
+        ag.add_action(tab_act)
+        win_act = Gio.SimpleAction.new("open-window", None)
+        if is_mounted and nav_uri:
+            win_act.connect("activate", lambda *_: self._do_open_window(nav_uri))
+        else:
+            win_act.connect("activate", lambda *_: self._do_mount_then_open(m, win, "window"))
+        ag.add_action(win_act)
+
+        # Section 2: mount / unmount / eject + format (non-system only)
+        if not is_system:
+            mid_sec = Gio.Menu()
+            if not is_mounted:
+                mid_sec.append(_("Mount"), "diskrow.mount")
                 mount_act = Gio.SimpleAction.new("mount", None)
                 mount_act.connect("activate", lambda *_: self._do_mount(m, win))
                 ag.add_action(mount_act)
-        else:
-            primary_section.append_item(_accel_item(_("Open"), "diskrow.open", "Return"))
-            primary_section.append_item(
-                _accel_item(_("Open in New Tab"), "diskrow.open-tab", "<Control>Return")
-            )
-            primary_section.append_item(
-                _accel_item(_("Open in New Window"), "diskrow.open-window", "<Shift>Return")
-            )
-
-            open_act = Gio.SimpleAction.new("open", None)
-            open_act.connect("activate", lambda *_: self._do_open(nav_uri, win))
-            ag.add_action(open_act)
-
-            tab_act = Gio.SimpleAction.new("open-tab", None)
-            tab_act.connect("activate", lambda *_: self._do_open_tab(nav_uri, win))
-            ag.add_action(tab_act)
-
-            win_act = Gio.SimpleAction.new("open-window", None)
-            win_act.connect("activate", lambda *_: self._do_open_window(nav_uri))
-            ag.add_action(win_act)
-
-        if primary_section.get_n_items() > 0:
-            menu.append_section(None, primary_section)
-
-        # Section 2: unmount/eject (mounted non-system only) + preferences
-        mid_section = Gio.Menu()
-        if not is_system and not is_unmounted:
-            if can_eject:
-                mid_section.append(_("Eject"), "diskrow.eject")
+            elif m.can_eject:
+                mid_sec.append(_("Eject"), "diskrow.eject")
                 eject_act = Gio.SimpleAction.new("eject", None)
                 eject_act.connect("activate", lambda *_: self._do_eject(m))
                 ag.add_action(eject_act)
             else:
-                mid_section.append(_("Unmount"), "diskrow.unmount")
+                mid_sec.append(_("Unmount"), "diskrow.unmount")
                 unmount_act = Gio.SimpleAction.new("unmount", None)
                 unmount_act.connect("activate", lambda *_: self._do_unmount(m))
                 ag.add_action(unmount_act)
-        device = m.device if m else ""
-        if not is_system and device.startswith("/dev/"):
-            mid_section.append(_("Format…"), "diskrow.format")
-            fmt_act = Gio.SimpleAction.new("format", None)
-            fmt_act.connect("activate", lambda *_: self._do_format(device))
-            ag.add_action(fmt_act)
+            if device.startswith("/dev/"):
+                mid_sec.append(_("Format…"), "diskrow.format")
+                fmt_act = Gio.SimpleAction.new("format", None)
+                fmt_act.connect("activate", lambda *_: self._do_format(device))
+                ag.add_action(fmt_act)
+            menu.append_section(None, mid_sec)
 
-        if mid_section.get_n_items() > 0:
-            menu.append_section(None, mid_section)
-
-        # Section 3: properties — only for mounted disks with a URI
-        if not is_unmounted and nav_uri:
-            props_section = Gio.Menu()
-            props_section.append_item(_accel_item(_("Properties"), "diskrow.props", "<Alt>Return"))
-            menu.append_section(None, props_section)
-
+        # Section 3: properties (mounted disks only)
+        if is_mounted and nav_uri:
+            props_sec = Gio.Menu()
+            props_sec.append_item(_accel_item(_("Properties"), "diskrow.props", "<Alt>Return"))
+            menu.append_section(None, props_sec)
             props_act = Gio.SimpleAction.new("props", None)
             props_act.connect("activate", lambda *_: self._do_properties(nav_uri, win))
             ag.add_action(props_act)
 
-        row.insert_action_group("diskrow", ag)
-
         popover = Gtk.PopoverMenu.new_from_model(menu)
         popover.set_has_arrow(False)
         popover.set_parent(row)
+        popover.insert_action_group("diskrow", ag)
         rect = Gdk.Rectangle()
         rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
         popover.set_pointing_to(rect)
@@ -2085,6 +2090,36 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             _log(f"mount failed: {e.message}")
         GLib.idle_add(self._repopulate_visible)
 
+    def _do_mount_then_open(self, m: MountInfo, win: Gtk.Window, mode: str) -> None:
+        if not m or not m.gio_volume:
+            return
+        op = Gio.MountOperation.new()
+        op.set_password_save(Gio.PasswordSave.NEVER)
+        m.gio_volume.mount(
+            Gio.MountMountFlags.NONE, op, None, self._on_mount_then_open_finish, (win, mode)
+        )
+
+    def _on_mount_then_open_finish(self, volume, result, user_data) -> None:
+        win, mode = user_data
+        try:
+            volume.mount_finish(result)
+        except GLib.Error as e:
+            _log(f"mount-then-open failed: {e.message}")
+            GLib.idle_add(self._repopulate_visible)
+            return
+        mount = volume.get_mount()
+        if not mount:
+            GLib.idle_add(self._repopulate_visible)
+            return
+        uri = mount.get_root().get_uri()
+        GLib.idle_add(self._repopulate_visible)
+        if mode == "tab":
+            GLib.idle_add(self._do_open_tab, uri, win)
+        elif mode == "window":
+            GLib.idle_add(self._do_open_window, uri)
+        else:
+            GLib.idle_add(self._do_open, uri, win)
+
     def _do_unmount(self, m: MountInfo) -> None:
         if not m or not m.gio_mount:
             return
@@ -2132,6 +2167,28 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
     def _do_properties(self, nav_uri: str, win: Gtk.Window) -> None:
         uri = nav_uri
 
+        # The native properties window is created in-process by Nautilus via the
+        # D-Bus ShowItemProperties call. It is NOT registered with the
+        # GtkApplication, so "window-added" never fires — we must poll
+        # list_toplevels() to find it. Once found, set it transient-for our
+        # window and modal so the compositor visually binds it to the parent
+        # (centered, above, moves/closes with it) instead of floating free.
+        before_ids = {id(w) for w in Gtk.Window.list_toplevels()}
+        state = {"done": False}
+
+        def _try_parent(attempt=0):
+            if state["done"]:
+                return GLib.SOURCE_REMOVE
+            for w in Gtk.Window.list_toplevels():
+                if id(w) not in before_ids and w is not win:
+                    w.set_transient_for(win)
+                    w.set_modal(True)
+                    state["done"] = True
+                    return GLib.SOURCE_REMOVE
+            if attempt < 40:
+                GLib.timeout_add(25, lambda: _try_parent(attempt + 1))
+            return GLib.SOURCE_REMOVE
+
         def _on_call(bus, result, _):
             try:
                 bus.call_finish(result)
@@ -2157,6 +2214,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             except Exception:
                 pass
 
+        # Start polling immediately so we catch the window as early as possible.
+        _try_parent()
         Gio.bus_get(Gio.BusType.SESSION, None, _on_bus)
 
     def _launch_prefs(self, win: Gtk.Window | None = None) -> None:

@@ -155,6 +155,9 @@ NETWORK_FSTYPES = {
 
 OPTICAL_FSTYPES = {"iso9660", "udf"}
 
+# Internal sentinel values used for fstype — not shown in UI
+_INTERNAL_FSTYPES = {"gvfs", "unmounted", "network-place"}
+
 # Mountpoint prefixes that indicate removable / external media
 EXTERNAL_PREFIXES = ("/media/", "/run/media/", "/mnt/")
 
@@ -221,6 +224,17 @@ def _gicon_renders(gicon) -> bool:
             return True
         return any(theme.has_icon(n) for n in gicon.get_names())
     return True
+
+
+def _read_os_name() -> str:
+    try:
+        with open("/etc/os-release") as f:
+            for line in f:
+                if line.startswith("PRETTY_NAME="):
+                    return line.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return ""
 
 
 def _build_uuid_map() -> dict[str, str]:
@@ -416,20 +430,18 @@ def _format_size(n: float) -> str:
     return f"{n:.1f} EB"
 
 
-def _scan_mounts() -> list[MountInfo]:
+def _scan_mounts(hide_boot_efi: bool = False) -> list[MountInfo]:
     mounts: list[MountInfo] = []
     seen: set[str] = set()
     uuid_map = _build_uuid_map()
 
-    hide_boot_efi = False
-    gsettings = _get_gsettings()
-    if gsettings:
-        hide_boot_efi = gsettings.get_boolean("hide-system-partitions")
-
     # Build mountpoint → Gio.Icon / Gio.Mount from VolumeMonitor so we can
     # attach the real hardware icon and GIO handle to each /proc/mounts entry.
+    # Also build a UUID fallback for mounts whose root path doesn't match the
+    # /proc/mounts mountpoint (e.g. root on LUKS/dm-crypt).
     icon_by_path: dict[str, Gio.Icon] = {}
     mount_by_path: dict[str, object] = {}
+    mount_by_uuid: dict[str, object] = {}
     try:
         vm = Gio.VolumeMonitor.get()
         for gm in vm.get_mounts():
@@ -438,6 +450,11 @@ def _scan_mounts() -> list[MountInfo]:
             if path:
                 icon_by_path[path] = gm.get_icon()
                 mount_by_path[path] = gm
+            vol = gm.get_volume()
+            if vol:
+                uid = vol.get_identifier(Gio.VOLUME_IDENTIFIER_KIND_UUID)
+                if uid:
+                    mount_by_uuid[uid] = gm
     except Exception:
         pass
 
@@ -464,12 +481,19 @@ def _scan_mounts() -> list[MountInfo]:
                     st = os.statvfs(mountpoint)
                     total = st.f_blocks * st.f_frsize
                     free = st.f_bavail * st.f_frsize
-                    name = os.path.basename(mountpoint) or "/"
-                    gio_mount = mount_by_path.get(mountpoint)
-                    gio_volume = gio_mount.get_volume() if gio_mount else None
-                    gio_drive = gio_volume.get_drive() if gio_volume else None
                     real_dev = os.path.realpath(device)
                     uuid = uuid_map.get(real_dev)
+                    gio_mount = mount_by_path.get(mountpoint) or (
+                        mount_by_uuid.get(uuid) if uuid else None
+                    )
+                    name = (
+                        (gio_mount.get_name() if gio_mount else None)
+                        or (mountpoint == "/" and _read_os_name())
+                        or os.path.basename(mountpoint)
+                        or "/"
+                    )
+                    gio_volume = gio_mount.get_volume() if gio_mount else None
+                    gio_drive = gio_volume.get_drive() if gio_volume else None
                     key = f"uuid:{uuid}" if uuid else device
                     mounts.append(
                         MountInfo(
@@ -870,7 +894,10 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         else:
             self._start_on_disks = False
 
-        _refresh(_scan_mounts() + _scan_gio_mounts() + _scan_gio_volumes())
+        _hide_boot_efi = (
+            self._gsettings.get_boolean("hide-system-partitions") if self._gsettings else False
+        )
+        _refresh(_scan_mounts(_hide_boot_efi) + _scan_gio_mounts() + _scan_gio_volumes())
 
         # Watch /proc/mounts at the kernel level — POLLPRI fires on any
         # mount/unmount regardless of how it happened (udisks, manual, FUSE…)
@@ -1220,7 +1247,10 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
     def _do_live_refresh(self) -> bool:
         self._refresh_pending = False
-        _refresh(_scan_mounts() + _scan_gio_mounts() + _scan_gio_volumes())
+        _hide_boot_efi = (
+            self._gsettings.get_boolean("hide-system-partitions") if self._gsettings else False
+        )
+        _refresh(_scan_mounts(_hide_boot_efi) + _scan_gio_mounts() + _scan_gio_volumes())
         # Re-discover network places in background; callback will repopulate
         _refresh_network_places(on_done=self._repopulate_visible)
         self._repopulate_visible()
@@ -1357,14 +1387,11 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         if bar is not None and total > 0:
             bar.set_value(min(1.0, (total - free) / total))
         if sub is not None and total > 0:
-            m = _disk_data.get(key)
-            base_sub = _("{free} free of {total}").format(
-                free=_format_size(free), total=_format_size(total)
+            sub.set_label(
+                _("{free} free of {total}").format(
+                    free=_format_size(free), total=_format_size(total)
+                )
             )
-            if m and m.fstype:
-                sub.set_label(f"{base_sub} • {m.fstype}")
-            else:
-                sub.set_label(base_sub)
 
     def _ensure_usage_poll_running(self) -> None:
         """Arm both usage poll workers if not already running."""
@@ -1662,7 +1689,6 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         card.set_margin_end(6)
         card.set_margin_top(6)
         card.set_margin_bottom(6)
-        card.set_cursor(Gdk.Cursor.new_from_name("pointer"))
         card.set_focusable(True)
         card.set_focus_on_click(True)
 
@@ -1701,10 +1727,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             v = min(m.percent / 100.0, 1.0)
             bar.set_value(v)
             bar.set_visible(True)
-            base_sub = _("{free} free of {total}").format(
+            sub_text = _("{free} free of {total}").format(
                 free=_format_size(m.free), total=_format_size(m.total)
             )
-            sub_text = f"{base_sub} • {m.fstype}" if m.fstype else base_sub
         else:
             bar.set_visible(False)
             sub_text = nav_uri
@@ -1719,6 +1744,10 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         details.append(sub_lbl)
 
         card.append(details)
+
+        if m.mountpoint:
+            fstype_part = f" ({m.fstype})" if m.fstype and m.fstype not in _INTERNAL_FSTYPES else ""
+            card.set_tooltip_text(f"{m.mountpoint}{fstype_part}")
 
         card._mount_key = m.key
         card._nav_uri = nav_uri

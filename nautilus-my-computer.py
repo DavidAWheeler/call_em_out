@@ -45,7 +45,7 @@ DEBUG_LOG_PREFIX = "MyComputer"  # prefix for all debug lines, to make them easy
 
 # ── Extension metadata (keep in sync with pyproject.toml) ────────────────────
 EXT_NAME = "My Computer for Nautilus"
-EXT_VERSION = "0.3.0"
+EXT_VERSION = "0.3.1"
 EXT_AUTHOR = "Yann Masoch"
 EXT_LICENSE = "MIT"
 EXT_GITHUB = "https://github.com/yannmasoch/nautilus-my-computer"

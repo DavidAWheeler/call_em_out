@@ -855,7 +855,6 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         self._nautilus_prefs = None  # Gio.Settings for org.gnome.nautilus.preferences
         self._bar_css_provider = Gtk.CssProvider()
         self._bar_css_display = None
-        self._bar_seq = 0
 
         self._gsettings = _get_gsettings()
         if self._gsettings:
@@ -1055,28 +1054,15 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         elif mode == "gradient":
             c1 = self._gsettings.get_string("gradient-color-1")
             c2 = self._gsettings.get_string("gradient-color-2")
-            # Detect RTL to mirror gradient and background position
-            is_rtl = Gtk.get_locale_direction() == Gtk.TextDirection.RTL
-            grad_dir = "to left" if is_rtl else "to right"
-            bg_pos = "right center" if is_rtl else "left center"
-            
-            # Gradient on block.filled, sized to the full trough width via background-size.
-            # For fill ratio v, background-size=(100/v)% makes the gradient span 100% of
-            # background-size:(100/v)% scales the gradient to the full trough width.
-            # block.filled (width=v×trough) acts as a reveal window anchored at left (or right in RTL).
-            rules = [
-                f".diskinfo-bar block.filled {{"
-                f" background-image: linear-gradient({grad_dir}, {c1} 20%, {c2} 100%);"
-                f" background-position: {bg_pos}; background-repeat: no-repeat; }}"
-            ]
-            for st in self._windows.values():
-                for bname, v in st.get("bar_geom", {}).items():
-                    if v > 0:
-                        pct = 100.0 / v
-                        rules.append(
-                            f"#{bname} block.filled {{ background-size: {pct:.4f}% 100%; }}"
-                        )
-            css = "".join(rules).encode()
+            # Use CSS :dir() so GTK resolves direction per-widget at render time.
+            # Gradient spans the filled area directly — no background-size trickery,
+            # which is unreliable on older GTK4 (e.g. Ubuntu 22.04 / GTK 4.6.x).
+            css = (
+                f".diskinfo-bar:dir(ltr) block.filled {{"
+                f" background: linear-gradient(to right, {c1} 20%, {c2} 100%); }}"
+                f".diskinfo-bar:dir(rtl) block.filled {{"
+                f" background: linear-gradient(to left, {c1} 20%, {c2} 100%); }}"
+            ).encode()
         else:
             css = b".diskinfo-bar block.filled { background: @accent_bg_color; }"
         self._bar_css_provider.load_from_data(css)
@@ -1546,7 +1532,6 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         grid_box = self._new_grid_box()
         section_flows: list[Gtk.FlowBox] = []
         card_widgets = {}
-        bar_geom = {}
 
         # Classify
         by_group: dict[str, list] = {
@@ -1625,7 +1610,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             container.connect("selected-children-changed", self._on_flow_selection_changed, win)
             section_flows.append(container)
             for m in items:
-                card = self._build_disk_card(m, group_key, win, card_widgets, bar_geom)
+                card = self._build_disk_card(m, group_key, win, card_widgets)
                 size_group.add_widget(card)
                 container.append(card)
 
@@ -1637,7 +1622,6 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                 grid_box.append(container)
 
         old_grid_box = state.get("grid_box")
-        state["bar_geom"] = bar_geom
         state["grid_box"] = grid_box
         state["section_flows"] = section_flows
         state["card_widgets"] = card_widgets
@@ -1648,7 +1632,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         self._apply_bar_color()
 
     def _build_disk_card(
-        self, m: MountInfo, group_key: str, win: Gtk.Window, card_widgets: dict, bar_geom: dict
+        self, m: MountInfo, group_key: str, win: Gtk.Window, card_widgets: dict
     ) -> Gtk.Widget:
         nav_uri = m.nav_uri or (
             Gio.File.new_for_path(m.mountpoint).get_uri() if m.mountpoint else ""
@@ -1701,11 +1685,6 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             v = min(m.percent / 100.0, 1.0)
             bar.set_value(v)
             bar.set_visible(True)
-            self._bar_seq += 1
-            bname = f"diskbar{self._bar_seq}"
-            bar.set_name(bname)
-            if v > 0:
-                bar_geom[bname] = v
             sub_text = _("{free} free of {total}").format(
                 free=_format_size(m.free), total=_format_size(m.total)
             )

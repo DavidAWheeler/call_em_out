@@ -8,15 +8,9 @@
 
 <br>
 
-![GitHub Tag](https://img.shields.io/github/v/tag/yannmasoch/nautilus-my-computer)
-![GitHub License](https://img.shields.io/github/license/yannmasoch/nautilus-my-computer?color=50fa7b)
-[![Stars](https://img.shields.io/github/stars/yannmasoch/nautilus-my-computer?style=social)](https://github.com/yannmasoch/nautilus-my-computer/stargazers)
-
-<br>
-
 **My Computer** is a custom view for GNOME Files (Nautilus), showing all your drives, volumes, and network mounts with usage levels in one clean panel.
 
-*"GNOME dropped the Other Locations view and left nothing in its place. I built what should have always been there and in a better way, for the GNOME community with ❤️"*
+*"GNOME dropped the Other Locations view and left nothing in its place. I built what should have always been there, and the GNOME community made it even better with ❤️"*
 
 </div>
 
@@ -112,6 +106,24 @@ All icons are native GNOME icons. My Computer works with any custom icon theme.
 
 > GNOME Files versions below 50 may have limited functionality. Full support targets GNOME Files 50+.
 
+## Languages
+
+My Computer is fully localised. The UI language is picked up automatically from your GNOME locale settings, no configuration required.
+
+Both left-to-right (LTR) and right-to-left (RTL) layouts are supported. The panel mirrors its layout direction automatically when a RTL language is active.
+
+| Language | Code | Direction |
+|----------|------|-----------|
+| English *(default)*| `en` | LTR |
+| Arabic | `ar` | RTL |
+| Catalan | `ca` | LTR |
+| French | `fr` | LTR |
+| Italian | `it` | LTR |
+| Portuguese | `pt` | LTR |
+| Spanish | `es` | LTR |
+
+Want to add your language? Contributions are welcome, open a PR with a new `.po` file under `po/`.
+
 ## About
 
 GNOME Files has no public API for adding custom views anymore. **My Computer** injects itself directly into the Nautilus widget tree at runtime, something no other extension currently does.
@@ -124,8 +136,16 @@ These weak points are known and documented. Each release consolidates them furth
 
 The goal is for My Computer to feel indistinguishable from a built-in feature and to stay that way across GNOME updates.
 
+## Contributors
+
+My Computer is community-built. These people have shaped what it is today.
+
+[![Contributors](https://contrib.rocks/image?repo=yannmasoch/nautilus-my-computer)](https://github.com/yannmasoch/nautilus-my-computer/graphs/contributors)
+
+Want to contribute? Check out [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## For GNOME community
 
-**My Computer** is built for GNOME community with ❤️ and your feedback is important!
+**My Computer** is built by the GNOME community with ❤️ and your feedback is important!
 
 *“They did not know it was impossible, so they did it”* ― Jean Cocteau (1954)

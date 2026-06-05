@@ -131,3 +131,9 @@ msgstr "Ouvrir dans une nouvelle fenêtre"
 
 msgid "Properties"
 msgstr "Propriétés"
+
+msgid "Hide system partitions"
+msgstr "Masquer les partitions système"
+
+msgid "Hide boot and EFI drives"
+msgstr "Masquer les partitions de démarrage (Boot et EFI)"

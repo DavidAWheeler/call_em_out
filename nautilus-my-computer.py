@@ -421,6 +421,11 @@ def _scan_mounts() -> list[MountInfo]:
     seen: set[str] = set()
     uuid_map = _build_uuid_map()
 
+    hide_boot_efi = False
+    gsettings = _get_gsettings()
+    if gsettings:
+        hide_boot_efi = gsettings.get_boolean("hide-system-partitions")
+
     # Build mountpoint → Gio.Icon / Gio.Mount from VolumeMonitor so we can
     # attach the real hardware icon and GIO handle to each /proc/mounts entry.
     icon_by_path: dict[str, Gio.Icon] = {}
@@ -451,6 +456,8 @@ def _scan_mounts() -> list[MountInfo]:
                 if (
                     fstype not in REAL_FSTYPES and not gvfs_show and not is_external
                 ) or device in seen:
+                    continue
+                if hide_boot_efi and mountpoint in ("/boot", "/boot/efi", "/efi"):
                     continue
                 seen.add(device)
                 try:
@@ -1043,6 +1050,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             self._start_on_disks = settings.get_boolean(key)
         elif key in ("color-mode", "custom-color", "gradient-color-1", "gradient-color-2"):
             self._apply_bar_color()
+        elif key == "hide-system-partitions":
+            self._schedule_live_refresh()
 
     def _apply_bar_color(self) -> None:
         if not self._gsettings or self._bar_css_display is None:
@@ -1348,7 +1357,14 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         if bar is not None and total > 0:
             bar.set_value(min(1.0, (total - free) / total))
         if sub is not None and total > 0:
-            sub.set_label(f"{_format_size(free)} free of {_format_size(total)}")
+            m = _disk_data.get(key)
+            base_sub = _("{free} free of {total}").format(
+                free=_format_size(free), total=_format_size(total)
+            )
+            if m and m.fstype:
+                sub.set_label(f"{base_sub} • {m.fstype}")
+            else:
+                sub.set_label(base_sub)
 
     def _ensure_usage_poll_running(self) -> None:
         """Arm both usage poll workers if not already running."""
@@ -1685,9 +1701,10 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             v = min(m.percent / 100.0, 1.0)
             bar.set_value(v)
             bar.set_visible(True)
-            sub_text = _("{free} free of {total}").format(
+            base_sub = _("{free} free of {total}").format(
                 free=_format_size(m.free), total=_format_size(m.total)
             )
+            sub_text = f"{base_sub} • {m.fstype}" if m.fstype else base_sub
         else:
             bar.set_visible(False)
             sub_text = nav_uri
@@ -2133,6 +2150,14 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         start_row.set_subtitle(_("Show the disk panel when Nautilus opens"))
         self._gsettings.bind("start-on-disks", start_row, "active", Gio.SettingsBindFlags.DEFAULT)
         gen_group.add(start_row)
+
+        hide_sys_row = Adw.SwitchRow()
+        hide_sys_row.set_title(_("Hide system partitions"))
+        hide_sys_row.set_subtitle(_("Hide boot and EFI drives"))
+        self._gsettings.bind(
+            "hide-system-partitions", hide_sys_row, "active", Gio.SettingsBindFlags.DEFAULT
+        )
+        gen_group.add(hide_sys_row)
 
         color_group = Adw.PreferencesGroup()
         color_group.set_title(_("Disk Usage Color"))

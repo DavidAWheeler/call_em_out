@@ -980,6 +980,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             self._inject_sidebar_link(win)
             self._attach_pathbar(win)
             self._on_title_changed(win, None)
+
             return True
         return False
 
@@ -1054,14 +1055,19 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         elif mode == "gradient":
             c1 = self._gsettings.get_string("gradient-color-1")
             c2 = self._gsettings.get_string("gradient-color-2")
+            # Detect RTL to mirror gradient and background position
+            is_rtl = Gtk.get_locale_direction() == Gtk.TextDirection.RTL
+            grad_dir = "to left" if is_rtl else "to right"
+            bg_pos = "right center" if is_rtl else "left center"
+            
             # Gradient on block.filled, sized to the full trough width via background-size.
             # For fill ratio v, background-size=(100/v)% makes the gradient span 100% of
             # background-size:(100/v)% scales the gradient to the full trough width.
-            # block.filled (width=v×trough) acts as a reveal window anchored at left.
+            # block.filled (width=v×trough) acts as a reveal window anchored at left (or right in RTL).
             rules = [
                 f".diskinfo-bar block.filled {{"
-                f" background-image: linear-gradient(to right, {c1} 20%, {c2} 100%);"
-                f" background-position: left center; background-repeat: no-repeat; }}"
+                f" background-image: linear-gradient({grad_dir}, {c1} 20%, {c2} 100%);"
+                f" background-position: {bg_pos}; background-repeat: no-repeat; }}"
             ]
             for st in self._windows.values():
                 for bname, v in st.get("bar_geom", {}).items():

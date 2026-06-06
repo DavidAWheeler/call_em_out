@@ -1619,8 +1619,12 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                     # Sort by type: root → system partitions → mounted → unmounted
                     items.sort(key=_get_local_mount_tier, reverse=False)
                 else:
-                    # Natural alphabetical sort (name) or by size: no type filtering
-                    items.sort(key=_sort_key, reverse=rev)
+                    # For any sort mode: mounted first, then unmounted (always last)
+                    mounted_items = [m for m in items if m.is_mounted]
+                    unmounted = [m for m in items if not m.is_mounted]
+                    mounted_items.sort(key=_sort_key, reverse=rev)
+                    unmounted.sort(key=_sort_key, reverse=rev)
+                    items = mounted_items + unmounted
                 by_group[gkey] = items
             elif gkey == "removable":
                 mounted_items = [m for m in items if m.is_mounted]

@@ -58,8 +58,8 @@ MENU_ITEM_LABEL = _("My Computer Settings")
 PREFS_WIN_TITLE = _("My Computer Settings")
 SCHEMA_ID = "io.github.yannmasoch.nautilus-my-computer"
 
-STACK_FILES = "files"  # name of the normal file-browser child in our Gtk.Stack
-STACK_DISKINFO = "diskinfo"  # name of our custom panel child in our Gtk.Stack
+STACK_FILES = "files"  # visible_child token — files view (Overlay base)
+STACK_DISKINFO = "diskinfo"  # visible_child token — our panel (Overlay child)
 
 METADATA_SORT_BY = "metadata::nautilus-icon-view-sort-by"
 METADATA_SORT_REVERSED = "metadata::nautilus-icon-view-sort-reversed"
@@ -1081,18 +1081,23 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
     def _set_stack_visible_child(self, state: dict, name: str, site: str) -> bool:
         if not self._has_live_stack(state, site):
             return False
-        files_widget = state.get("files_widget")
         panel = state.get("panel")
-        if files_widget is None or panel is None:
+        if panel is None:
             return False
 
         self._trace_stack_set(state["stack"], name, site)
-        if name == STACK_FILES:
-            files_widget.set_visible(True)
-            panel.set_visible(False)
-        else:
-            files_widget.set_visible(False)
-            panel.set_visible(True)
+        # files_widget is the always-present Overlay base — never hidden (hiding
+        # it would reparent/unmap and risk the GTK_IS_STACK crash). Toggle only
+        # the panel overlay's visibility, and make the base view insensitive
+        # while the panel covers it: still mapped (no tree surgery) but blocking
+        # pointer input to the covered view. Sensitivity is input-only — it does
+        # not touch the tree. Keyboard type-ahead is hooked above focus by
+        # Nautilus, so it's blocked separately by the capture-phase key guard
+        # (_on_window_key_capture) installed on the window.
+        panel.set_visible(name == STACK_DISKINFO)
+        files_widget = state.get("files_widget")
+        if files_widget is not None:
+            files_widget.set_sensitive(name == STACK_FILES)
 
         state["visible_child"] = name
         return True
@@ -1467,39 +1472,40 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                     break
 
         panel, grid_host, grid_box = self._build_panel(nautilus_win)
-        # Instead of Gtk.Stack, we use a Gtk.Box to hold the files view and our panel.
-        # This prevents GTK/Nautilus from mistaking our container for the view's internal GtkStack,
-        # which causes assertion failures and segfaults on GNOME 43+ during menu updates.
-        stack = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        stack.set_hexpand(True)
-        stack.set_vexpand(True)
+        # Use Gtk.Overlay: files view is the always-present base; our panel floats
+        # on top as an overlay child, visible only on computer:///. The Overlay type
+        # is opaque to Nautilus's gtk_widget_get_ancestor(view, GTK_TYPE_STACK) walk,
+        # so it never confuses Nautilus's internal view GtkStack (unlike a Gtk.Stack
+        # wrapper, which caused the GTK_IS_STACK assertion / SIGSEGV on GNOME 43+).
+        stack = Gtk.Overlay()
 
-        # Always start on STACK_FILES.
-        initial_child = STACK_FILES
+        # Panel must fill the full Overlay area so the files view doesn't show through.
+        panel.set_halign(Gtk.Align.FILL)
+        panel.set_valign(Gtk.Align.FILL)
 
         if toolbar_view:
             files_widget = toolbar_view.get_content()
             if not files_widget:
                 return False
             toolbar_view.set_content(stack)
-            stack.append(files_widget)
-            stack.append(panel)
+            stack.set_child(files_widget)
+            stack.add_overlay(panel)
         else:
             files_widget = right
             if not files_widget:
                 return False
             split_view.set_content(stack)
-            stack.append(files_widget)
-            stack.append(panel)
+            stack.set_child(files_widget)
+            stack.add_overlay(panel)
 
-        self._trace_stack_set(stack, initial_child, "inject_stack initial")
-        files_widget.set_visible(initial_child == STACK_FILES)
-        panel.set_visible(initial_child == STACK_DISKINFO)
+        # Start with the files view — panel hidden until title changes to computer:///.
+        self._trace_stack_set(stack, STACK_FILES, "inject_stack initial")
+        panel.set_visible(False)
 
         self._windows[nautilus_win] = {
             "stack": stack,
             "stack_alive": True,
-            "visible_child": initial_child,
+            "visible_child": STACK_FILES,
             "files_widget": files_widget,
             "panel": panel,
             "grid_host": grid_host,
@@ -1523,9 +1529,38 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             )
         )
 
+        # Capture-phase key guard on the window: Nautilus's "type to search"
+        # type-ahead is hooked above keyboard focus, so neither hiding nor
+        # de-focusing the covered file view stops it. A controller at the top of
+        # the capture chain sees keystrokes first and swallows plain printable
+        # ones while the panel is shown — so typing doesn't reopen the vanilla
+        # computer:/// search. Modified shortcuts (Ctrl/Alt/Super) and control
+        # keys (arrows, Tab, Enter, Esc) always pass through.
+        key_guard = Gtk.EventControllerKey()
+        key_guard.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        key_guard.connect("key-pressed", self._on_window_key_capture, nautilus_win)
+        nautilus_win.add_controller(key_guard)
+
         # If this window is headed to computer:///, let the later title-change
         # path do the first populate + switch once Nautilus has settled.
 
+        return True
+
+    def _on_window_key_capture(self, _ctrl, keyval, _keycode, gtk_state, win) -> bool:
+        """Swallow plain printable keystrokes while our panel is shown, so
+        Nautilus's window-level type-ahead search doesn't reopen the file view."""
+        state = self._windows.get(win)
+        if not state or state.get("visible_child") != STACK_DISKINFO:
+            return False
+        # Let modified shortcuts through (Ctrl+L, Alt+Left, Super, …).
+        if gtk_state & (
+            Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SUPER_MASK
+        ):
+            return False
+        # Only swallow printable characters (>= space). Control keys — arrows,
+        # Tab, Enter, Esc, function keys — map to unicode < 0x20 and pass through.
+        if Gdk.keyval_to_unicode(keyval) < 0x20:
+            return False
         return True
 
     # ── Panel construction ────────────────────────────────────────────────────

@@ -43,6 +43,26 @@ def _(text: str) -> str:
 DEBUG_LOG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 DEBUG_LOG_PREFIX = "MyComputer"  # prefix for all debug lines, to make them easy to filter in logs
 
+
+# ── Per-site injection toggles (debugging) ────────────────────────────────────
+# We catch/inject into Nautilus at four independent sites. Each flag gates EVERY
+# entry point for that site so a site can be fully isolated while debugging the
+# Nautilus templates-menu use-after-free (crash on navigation with non-empty
+# ~/Templates). Set to False to disable that site entirely. Env override:
+# e.g. MC_MAIN_VIEW=0. Default all on.
+def _flag(name: str, default: bool = True) -> bool:
+    v = os.environ.get(name)
+    if v is None:
+        return default
+    return v.lower() in ("1", "true", "yes", "on")
+
+
+DEBUG_MAIN_VIEW_ACTIVE = _flag("MC_MAIN_VIEW")  # main view: panel overlay over the file view
+DEBUG_COMPUTER_BUTTON_ACTIVE = _flag("MC_COMPUTER_BUTTON")  # left sidebar: "Computer" row injection
+DEBUG_PATHBAR_ACTIVE = _flag("MC_PATHBAR")  # top URL bar: chip icon pinning
+DEBUG_SORT_WATCH_ACTIVE = _flag("MC_SORT_WATCH")  # top view-mode/sort buttons: sort metadata watch
+DEBUG_SELFTEST = _flag("MC_SELFTEST", default=False)  # in-process navigation self-test driver
+
 # ── Extension metadata (keep in sync with pyproject.toml) ────────────────────
 EXT_NAME = "My Computer for Nautilus"
 EXT_VERSION = "0.3.1"
@@ -1024,12 +1044,52 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             win.connect("destroy", self._on_window_destroyed)
             win.connect("notify::title", self._on_title_changed)
 
-            self._inject_sidebar_link(win)
-            self._attach_pathbar(win)
+            if DEBUG_COMPUTER_BUTTON_ACTIVE:
+                self._inject_sidebar_link(win)
             self._on_title_changed(win, None)
+
+            if DEBUG_SELFTEST and not getattr(self, "_selftest_started", False):
+                self._selftest_started = True
+                GLib.timeout_add(3000, lambda: self._run_selftest(win))
 
             return True
         return False
+
+    def _run_selftest(self, win) -> bool:
+        """Debug-only: drive in-process navigation (no keyboard/focus needed) so
+        the templates-menu crash can be reproduced deterministically."""
+        home = os.path.expanduser
+        steps = [
+            DISKS_URI,
+            Gio.File.new_for_path(home("~/Downloads")).get_uri(),
+            DISKS_URI,
+            Gio.File.new_for_path(home("~/Documents")).get_uri(),
+            DISKS_URI,
+            Gio.File.new_for_path(home("~/Downloads")).get_uri(),
+        ]
+        idx = [0]
+
+        def step():
+            if win not in self._windows:
+                _log("SELFTEST: window gone")
+                return GLib.SOURCE_REMOVE
+            if idx[0] >= len(steps):
+                _log("SELFTEST DONE: survived all navigations")
+                return GLib.SOURCE_REMOVE
+            uri = steps[idx[0]]
+            idx[0] += 1
+            _log(f"SELFTEST step -> {uri}")
+            for w in _all_widgets(win):
+                if "Slot" in type(w).__name__:
+                    try:
+                        if w.activate_action("open-location", GLib.Variant("s", uri)):
+                            break
+                    except Exception:
+                        pass
+            return GLib.SOURCE_CONTINUE
+
+        GLib.timeout_add(2500, step)
+        return GLib.SOURCE_REMOVE
 
     def _check_new_windows(self) -> bool:
         toplevels = Gtk.Window.list_toplevels()
@@ -1484,7 +1544,12 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         panel.set_halign(Gtk.Align.FILL)
         panel.set_valign(Gtk.Align.FILL)
 
-        if toolbar_view:
+        if not DEBUG_MAIN_VIEW_ACTIVE:
+            # Main-view site disabled: keep the overlay/panel ORPHAN (never inserted
+            # into Nautilus's tree) so other sites can still be exercised/isolated.
+            files_widget = None
+            _log("inject_overlay: DEBUG_MAIN_VIEW_ACTIVE=False — overlay kept orphan")
+        elif toolbar_view:
             files_widget = toolbar_view.get_content()
             if not files_widget:
                 return False
@@ -1873,9 +1938,6 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         if not self._has_live_overlay(state, "title changed"):
             return
 
-        if not state.get("pathbar"):
-            self._attach_pathbar(win)
-
         current_title = win.get_title() or ""
         in_view = _LOCATION_TITLE in current_title
 
@@ -1928,9 +1990,10 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             # already showing the panel — on the start-on-disks path the panel is
             # pre-shown before navigation completes, so the chip only gains its
             # "Computer" label here, after the overlay is already DISKINFO.
-            root = state.get("pathbar") or win
-            GLib.idle_add(lambda: self._fix_pathbar_icon(root) or False)
-            GLib.idle_add(lambda w=win: self._attach_sort_button_watch(w) or False)
+            if DEBUG_PATHBAR_ACTIVE:
+                GLib.idle_add(lambda w=win: self._fix_pathbar_icon(w) or False)
+            if DEBUG_SORT_WATCH_ACTIVE:
+                GLib.idle_add(lambda w=win: self._attach_sort_button_watch(w) or False)
         elif not in_view and current != VIEW_FILES:
             if state:
                 state["_deselecting"] = True
@@ -2687,99 +2750,25 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         _log("_inject_sidebar_link: outer scroll wrapper set as content ✓")
         return True
 
-    def _attach_pathbar(self, win: Gtk.Window) -> bool:
-        """Locate the path bar and cache it. If found, installs watchers to
-        automatically fix chips as they appear."""
-        state = self._windows.get(win)
-        if not state:
-            return False
+    def _fix_pathbar_icon(self, win: Gtk.Window) -> bool:
+        """Non-invasive chip icon update. Called on each title-change arrival at
+        computer:///. Scans the window for the chip label, finds the existing
+        Gtk.Image in the chip, and pins it to computer-symbolic.
 
-        found_widget = _find_widget(
-            win,
-            buildable_id="path_bar",
-            class_name="NautilusPathBar",
-            css_class="nautilus-pathbar",
-            site="_attach_pathbar",
-        )
-
-        if found_widget is not None:
-            state["pathbar"] = found_widget
-
-            # Watch everything!
-            for w in _all_widgets(found_widget):
-                if isinstance(w, Gtk.Stack):
-                    w.connect(
-                        "notify::visible-child",
-                        lambda *_: GLib.idle_add(
-                            lambda: self._fix_pathbar_icon(found_widget) or False
-                        ),
-                    )
-                elif isinstance(w, Gtk.Box):
-                    self._watch_box_children(w, found_widget)
-
-            self._fix_pathbar_icon(found_widget)
-            self._subscribe_pathbar_labels(found_widget)
-            return True
-        return False
-
-    def _watch_box_children(self, box, pathbar) -> None:
-        """Observe children changes in a Gtk.Box to catch new chips."""
-        if not isinstance(box, Gtk.Box) or getattr(box, "_diskinfo_watched", False):
-            return
-        box._diskinfo_watched = True
-        model = box.observe_children()
-        box._diskinfo_observer = model  # keep the listmodel alive (prevent GC)
-
-        def _on_items_changed(*_):
-            child = box.get_first_child()
-            while child:
-                if isinstance(child, Gtk.Box):
-                    self._watch_box_children(child, pathbar)
-                child = child.get_next_sibling()
-            self._subscribe_pathbar_labels(pathbar)
-            GLib.idle_add(lambda: self._fix_pathbar_icon(pathbar) or False)
-
-        model.connect("items-changed", _on_items_changed)
-
-        child = box.get_first_child()
-        while child:
-            if isinstance(child, Gtk.Box):
-                self._watch_box_children(child, pathbar)
-            child = child.get_next_sibling()
-
-    def _subscribe_pathbar_labels(self, pathbar) -> None:
-        """Connect notify::label on every GtkLabel inside *pathbar*."""
+        Never connects signals to Nautilus's internal pathbar GtkStack or box
+        models, and never calls set_child() — those caused the GTK_IS_STACK crash
+        (issue #11). The notify::title trigger already fires on every navigation,
+        so no persistent watcher is needed."""
         target_labels = {COMPUTER_LABEL, _LOCATION_TITLE}
-        for w in _all_widgets(pathbar):
-            if isinstance(w, Gtk.Label) and not getattr(w, "_diskinfo_label_watched", False):
-                w._diskinfo_label_watched = True
-                w.connect(
-                    "notify::label",
-                    lambda lbl, _pspec, pb=pathbar: (
-                        self._fix_pathbar_icon(pb)
-                        if lbl.get_label() and lbl.get_label().strip() in target_labels
-                        else None
-                    ),
-                )
 
-    def _fix_pathbar_icon(self, pathbar_or_win) -> bool:
-        """Search within the given root widget for any GtkLabel showing
-        COMPUTER_LABEL or _LOCATION_TITLE inside a path-bar-like structure.
-        Ensures a computer-symbolic icon is present and pinned."""
-        if pathbar_or_win is None:
-            return False
-
-        target_labels = {COMPUTER_LABEL, _LOCATION_TITLE}
-        for w in _all_widgets(pathbar_or_win):
+        for w in _all_widgets(win):
             if not isinstance(w, Gtk.Label):
                 continue
-
             label_text = w.get_label()
             if not label_text or label_text.strip() not in target_labels:
                 continue
 
-            # Skip labels inside any sidebar-like widget
-            # (unless we're explicitly fixing the sidebar)
+            # Skip labels inside the sidebar
             ancestor = w.get_parent()
             in_sidebar = False
             while ancestor:
@@ -2787,15 +2776,13 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                 if "Sidebar" in cls or "PlacesView" in cls:
                     in_sidebar = True
                     break
-                # Breadcrumb button detection
                 if cls in ("NautilusPathBarButton", "GtkButton", "AdwButton"):
                     break
                 ancestor = ancestor.get_parent()
-
-            if in_sidebar and "PathBar" not in type(pathbar_or_win).__name__:
+            if in_sidebar:
                 continue
 
-            # Find the containing button/chip container
+            # Walk up to the chip container
             container = w.get_parent()
             while container and type(container).__name__ not in (
                 "NautilusPathBarButton",
@@ -2809,43 +2796,11 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             if not container:
                 continue
 
-            # Look for ANY image inside this container
-            image = None
+            # Pin the existing chip image — no structural changes to Nautilus's tree
             for sub in _all_widgets(container):
                 if isinstance(sub, Gtk.Image):
-                    image = sub
+                    _pin_icon(sub, COMPUTER_ICON)
                     break
-
-            if image:
-                _pin_icon(image, COMPUTER_ICON)
-                image.set_visible(True)
-            else:
-                # No image found at all in the button/chip structure.
-                parent = w.get_parent()
-                if isinstance(parent, Gtk.Box):
-                    image = Gtk.Image.new_from_icon_name(COMPUTER_ICON)
-                    image.set_valign(Gtk.Align.CENTER)
-                    parent.prepend(image)
-                    _pin_icon(image, COMPUTER_ICON)
-                elif type(parent).__name__ in (
-                    "GtkButton",
-                    "NautilusPathBarButton",
-                    "GtkToggleButton",
-                    "Button",
-                    "ToggleButton",
-                ) or hasattr(parent, "set_child"):
-                    # Use native default spacing
-                    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-                    box.set_spacing(0)
-                    image = Gtk.Image.new_from_icon_name(COMPUTER_ICON)
-                    image.set_valign(Gtk.Align.CENTER)
-                    _pin_icon(image, COMPUTER_ICON)
-
-                    w._diskinfo_wrapped = True
-                    parent.set_child(None)
-                    box.append(image)
-                    box.append(w)
-                    parent.set_child(box)
 
         return False
 

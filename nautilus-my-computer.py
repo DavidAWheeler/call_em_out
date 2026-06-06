@@ -58,8 +58,8 @@ MENU_ITEM_LABEL = _("My Computer Settings")
 PREFS_WIN_TITLE = _("My Computer Settings")
 SCHEMA_ID = "io.github.yannmasoch.nautilus-my-computer"
 
-STACK_FILES = "files"  # visible_child token — files view (Overlay base)
-STACK_DISKINFO = "diskinfo"  # visible_child token — our panel (Overlay child)
+VIEW_FILES = "files"  # visible_view token — files view (Overlay base)
+VIEW_DISKINFO = "diskinfo"  # visible_view token — our panel (Overlay child)
 
 METADATA_SORT_BY = "metadata::nautilus-icon-view-sort-by"
 METADATA_SORT_REVERSED = "metadata::nautilus-icon-view-sort-reversed"
@@ -872,7 +872,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
     def __init__(self):
         super().__init__()
         # Maps each NautilusWindow to its per-window state dict:
-        #   stack, panel, content_box, force_disks, initial_title
+        #   overlay, panel, content_box, force_disks, initial_title
         self._windows: dict = {}
         self._polling_started = False
         self._refresh_pending = False  # debounce flag for live-refresh
@@ -968,7 +968,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         """Wait for the window's first view load to settle, then inject on a
         low-priority idle.
 
-        Injecting our Gtk.Stack reparents the AdwToolbarView content. Doing that
+        Injecting our Gtk.Overlay reparents the AdwToolbarView content. Doing that
         during Nautilus's files_view_begin_loading races with its templates
         context-menu rebuild: with a non-empty ~/Templates,
         slot_on_templates_menu_changed rebuilds a GtkPopoverMenu whose internal
@@ -1020,7 +1020,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         if self._bar_css_display is None:
             self._bar_css_display = display
             self._apply_bar_color()
-        if self._inject_stack(win):
+        if self._inject_overlay(win):
             win.connect("destroy", self._on_window_destroyed)
             win.connect("notify::title", self._on_title_changed)
 
@@ -1049,57 +1049,58 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         state = self._windows.pop(win, None)
         if state:
             tick_id = state.get("stale_release_tick_id")
-            stack = state.get("stack")
-            if tick_id is not None and stack is not None and hasattr(stack, "remove_tick_callback"):
-                stack.remove_tick_callback(tick_id)
+            overlay = state.get("overlay")
+            if (
+                tick_id is not None
+                and overlay is not None
+                and hasattr(overlay, "remove_tick_callback")
+            ):
+                overlay.remove_tick_callback(tick_id)
             state["stale_release_tick_id"] = None
             state["stale_release_ticks"] = 0
             state.get("stale_generations", []).clear()
         # Stop usage poll workers if this was the last window showing our panel.
         self._stop_usage_poll_if_idle()
 
-    def _on_stack_finalized(self, win: Gtk.Window, state: dict) -> None:
-        if state.get("stack") is None and not state.get("stack_alive", True):
+    def _on_overlay_finalized(self, win: Gtk.Window, state: dict) -> None:
+        if state.get("overlay") is None and not state.get("overlay_alive", True):
             return
-        was_visible = state.get("visible_child") == STACK_DISKINFO
-        state["stack"] = None
-        state["stack_alive"] = False
-        state["visible_child"] = None
-        _log(f"stack finalized before window destroy for {type(win).__name__}")
+        was_visible = state.get("visible_view") == VIEW_DISKINFO
+        state["overlay"] = None
+        state["overlay_alive"] = False
+        state["visible_view"] = None
+        _log(f"overlay finalized before window destroy for {type(win).__name__}")
         if was_visible:
             GLib.idle_add(self._stop_usage_poll_if_idle)
 
-    def _has_live_stack(self, state: dict, site: str) -> bool:
-        if state.get("stack") is None or not state.get("stack_alive", True):
-            _log(f"{site}: skip dead stack")
+    def _has_live_overlay(self, state: dict, site: str) -> bool:
+        if state.get("overlay") is None or not state.get("overlay_alive", True):
+            _log(f"{site}: skip dead overlay")
             return False
         return True
 
-    def _trace_stack_set(self, stack: Gtk.Widget, name: str, site: str) -> None:
-        _log(f"{site}: set_visible_child_name('{name}') on {type(stack).__name__}@0x{id(stack):x}")
+    def _trace_view_set(self, overlay: Gtk.Widget, name: str, site: str) -> None:
+        _log(f"{site}: show view '{name}' on {type(overlay).__name__}@0x{id(overlay):x}")
 
-    def _set_stack_visible_child(self, state: dict, name: str, site: str) -> bool:
-        if not self._has_live_stack(state, site):
+    def _set_visible_view(self, state: dict, name: str, site: str) -> bool:
+        if not self._has_live_overlay(state, site):
             return False
         panel = state.get("panel")
         if panel is None:
             return False
 
-        self._trace_stack_set(state["stack"], name, site)
+        self._trace_view_set(state["overlay"], name, site)
         # files_widget is the always-present Overlay base — never hidden (hiding
         # it would reparent/unmap and risk the GTK_IS_STACK crash). Toggle only
-        # the panel overlay's visibility, and make the base view insensitive
-        # while the panel covers it: still mapped (no tree surgery) but blocking
-        # pointer input to the covered view. Sensitivity is input-only — it does
-        # not touch the tree. Keyboard type-ahead is hooked above focus by
-        # Nautilus, so it's blocked separately by the capture-phase key guard
-        # (_on_window_key_capture) installed on the window.
-        panel.set_visible(name == STACK_DISKINFO)
-        files_widget = state.get("files_widget")
-        if files_widget is not None:
-            files_widget.set_sensitive(name == STACK_FILES)
+        # the panel overlay's visibility. The panel is opaque and FILL/FILL, so
+        # it absorbs all pointer events without needing set_sensitive() on the
+        # base. Keyboard type-ahead is blocked separately by the capture-phase
+        # key guard (_on_window_key_capture). Do NOT call set_sensitive() on the
+        # base (AdwTabView): it covers all tabs, so toggling it disrupts Nautilus
+        # keyboard controllers on other tabs and causes freezes in multi-tab.
+        panel.set_visible(name == VIEW_DISKINFO)
 
-        state["visible_child"] = name
+        state["visible_view"] = name
         return True
 
     def _on_settings_changed(self, settings: Gio.Settings, key: str) -> None:
@@ -1208,9 +1209,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
     def _on_sort_button_active(self, btn: Gtk.MenuButton, _param, nautilus_win: Gtk.Window) -> None:
         state = self._windows.get(nautilus_win)
-        if not state or not self._has_live_stack(state, "sort button"):
+        if not state or not self._has_live_overlay(state, "sort button"):
             return
-        if state.get("visible_child") != STACK_DISKINFO:
+        if state.get("visible_view") != VIEW_DISKINFO:
             return
         if btn.get_active():
             self._sort_hover = True
@@ -1289,9 +1290,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
     def _repopulate_visible(self) -> bool:
         """Repopulate whichever windows are showing the disk view."""
         for win, state in list(self._windows.items()):
-            if not self._has_live_stack(state, "repopulate_visible"):
+            if not self._has_live_overlay(state, "repopulate_visible"):
                 continue
-            if state.get("visible_child") == STACK_DISKINFO:
+            if state.get("visible_view") == VIEW_DISKINFO:
                 self._populate(win)
         return GLib.SOURCE_REMOVE
 
@@ -1401,9 +1402,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                 continue
             _disk_data[key] = dataclasses.replace(_disk_data[key], total=total, free=free)
             for state in self._windows.values():
-                if not self._has_live_stack(state, "apply_usage_updates"):
+                if not self._has_live_overlay(state, "apply_usage_updates"):
                     continue
-                if state.get("visible_child") != STACK_DISKINFO:
+                if state.get("visible_view") != VIEW_DISKINFO:
                     continue
                 self._update_card_usage(state, key, total, free)
         return GLib.SOURCE_REMOVE
@@ -1437,9 +1438,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
     def _stop_usage_poll_if_idle(self) -> None:
         """Disarm poll workers when no window is showing the disk panel."""
         any_visible = any(
-            st.get("stack") is not None
-            and st.get("stack_alive", True)
-            and st.get("visible_child") == STACK_DISKINFO
+            st.get("overlay") is not None
+            and st.get("overlay_alive", True)
+            and st.get("visible_view") == VIEW_DISKINFO
             for st in self._windows.values()
         )
         if not any_visible:
@@ -1453,14 +1454,14 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                 self._net_poll_cancellable.cancel()
                 self._net_poll_cancellable = None
 
-    def _inject_stack(self, nautilus_win: Gtk.Window) -> bool:
+    def _inject_overlay(self, nautilus_win: Gtk.Window) -> bool:
         split_view = None
         for w in _all_widgets(nautilus_win):
             if isinstance(w, Adw.OverlaySplitView):
                 split_view = w
                 break
         if not split_view:
-            _log("inject_stack: Adw.OverlaySplitView not found — widget tree may have changed")
+            _log("inject_overlay: Adw.OverlaySplitView not found — widget tree may have changed")
             return False
 
         toolbar_view = None
@@ -1477,7 +1478,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         # is opaque to Nautilus's gtk_widget_get_ancestor(view, GTK_TYPE_STACK) walk,
         # so it never confuses Nautilus's internal view GtkStack (unlike a Gtk.Stack
         # wrapper, which caused the GTK_IS_STACK assertion / SIGSEGV on GNOME 43+).
-        stack = Gtk.Overlay()
+        overlay = Gtk.Overlay()
 
         # Panel must fill the full Overlay area so the files view doesn't show through.
         panel.set_halign(Gtk.Align.FILL)
@@ -1487,25 +1488,25 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             files_widget = toolbar_view.get_content()
             if not files_widget:
                 return False
-            toolbar_view.set_content(stack)
-            stack.set_child(files_widget)
-            stack.add_overlay(panel)
+            toolbar_view.set_content(overlay)
+            overlay.set_child(files_widget)
+            overlay.add_overlay(panel)
         else:
             files_widget = right
             if not files_widget:
                 return False
-            split_view.set_content(stack)
-            stack.set_child(files_widget)
-            stack.add_overlay(panel)
+            split_view.set_content(overlay)
+            overlay.set_child(files_widget)
+            overlay.add_overlay(panel)
 
         # Start with the files view — panel hidden until title changes to computer:///.
-        self._trace_stack_set(stack, STACK_FILES, "inject_stack initial")
+        self._trace_view_set(overlay, VIEW_FILES, "inject_overlay initial")
         panel.set_visible(False)
 
         self._windows[nautilus_win] = {
-            "stack": stack,
-            "stack_alive": True,
-            "visible_child": STACK_FILES,
+            "overlay": overlay,
+            "overlay_alive": True,
+            "visible_view": VIEW_FILES,
             "files_widget": files_widget,
             "panel": panel,
             "grid_host": grid_host,
@@ -1523,9 +1524,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             "selected_key": None,
             "header_motion": None,  # Gtk.EventControllerMotion on the header bar
         }
-        stack.weak_ref(
+        overlay.weak_ref(
             lambda w=nautilus_win, st=self._windows.get(nautilus_win): (
-                self._on_stack_finalized(w, st) if st is not None else None
+                self._on_overlay_finalized(w, st) if st is not None else None
             )
         )
 
@@ -1550,7 +1551,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         """Swallow plain printable keystrokes while our panel is shown, so
         Nautilus's window-level type-ahead search doesn't reopen the file view."""
         state = self._windows.get(win)
-        if not state or state.get("visible_child") != STACK_DISKINFO:
+        if not state or state.get("visible_view") != VIEW_DISKINFO:
             return False
         # Let modified shortcuts through (Ctrl+L, Alt+Left, Super, …).
         if gtk_state & (
@@ -1560,6 +1561,11 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         # Only swallow printable characters (>= space). Control keys — arrows,
         # Tab, Enter, Esc, function keys — map to unicode < 0x20 and pass through.
         if Gdk.keyval_to_unicode(keyval) < 0x20:
+            return False
+        # If the user opened a text entry (Ctrl+L location bar, Ctrl+F search),
+        # the focused widget is an Editable — let it receive the keystroke.
+        focused = win.get_focus()
+        if focused is not None and isinstance(focused, Gtk.Editable):
             return False
         return True
 
@@ -1588,7 +1594,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         if state.get("stale_release_tick_id") is not None:
             return
 
-        owner = state.get("stack")
+        owner = state.get("overlay")
         if owner is None or not hasattr(owner, "add_tick_callback"):
             GLib.timeout_add(50, lambda st=state: self._release_stale_generations(st))
             return
@@ -1864,7 +1870,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         state = self._windows.get(win)
         if not state:
             return
-        if not self._has_live_stack(state, "title changed"):
+        if not self._has_live_overlay(state, "title changed"):
             return
 
         if not state.get("pathbar"):
@@ -1875,13 +1881,13 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         # A transient/empty title ("Loading…") means the window hasn't resolved
         # its location yet. Never act on it: it must not consume the one-shot
-        # start-on-computer flag, nor flip the stack to the file view.
+        # start-on-computer flag, nor flip the overlay to the file view.
         if _is_unsettled_title(current_title):
             return
 
         # While the startup navigation to computer:/// is still in flight, keep
         # the panel pinned. Intermediate titles (e.g. a lingering "Home") must
-        # not flip the stack to the file view and cause a flash.
+        # not flip the overlay to the file view and cause a flash.
         if state.get("awaiting_disks"):
             if in_view:
                 state["awaiting_disks"] = False  # arrived, fall through
@@ -1902,13 +1908,11 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             else:
                 in_view = True
 
-        current = state.get("visible_child")
+        current = state.get("visible_view")
         if in_view:
-            if current != STACK_DISKINFO:
+            if current != VIEW_DISKINFO:
                 self._populate(win)
-                if not self._set_stack_visible_child(
-                    state, STACK_DISKINFO, "title changed show diskinfo"
-                ):
+                if not self._set_visible_view(state, VIEW_DISKINFO, "title changed show diskinfo"):
                     return
                 self._ensure_usage_poll_running()
                 GLib.idle_add(
@@ -1920,18 +1924,14 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                     GLib.idle_add(lambda lb=sidebar_lb, r=sidebar_row: lb.select_row(r) or False)
 
             # Re-pin the chrome icons (path-bar chip + sidebar row) every time we
-            # arrive at the computer view. This must run even when the stack is
+            # arrive at the computer view. This must run even when the overlay is
             # already showing the panel — on the start-on-disks path the panel is
             # pre-shown before navigation completes, so the chip only gains its
-            # "Computer" label here, after the stack is already DISKINFO.
+            # "Computer" label here, after the overlay is already DISKINFO.
             root = state.get("pathbar") or win
             GLib.idle_add(lambda: self._fix_pathbar_icon(root) or False)
-            # Refresh sort once on arrival, and ensure the header-hover poll that
-            # tracks later sort changes is armed (no-op if already attached).
-            if self._read_sort_metadata():
-                self._populate(win)
             GLib.idle_add(lambda w=win: self._attach_sort_button_watch(w) or False)
-        elif not in_view and current != STACK_FILES:
+        elif not in_view and current != VIEW_FILES:
             if state:
                 state["_deselecting"] = True
                 for flow in state.get("section_flows", []):
@@ -1941,7 +1941,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             sidebar_lb = state.get("sidebar_listbox")
             if sidebar_lb:
                 GLib.idle_add(lambda lb=sidebar_lb: lb.unselect_all() or False)
-            if not self._set_stack_visible_child(state, STACK_FILES, "title changed show files"):
+            if not self._set_visible_view(state, VIEW_FILES, "title changed show files"):
                 return
             self._stop_usage_poll_if_idle()
 
@@ -2098,7 +2098,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         # Switch to the files view first — new-tab action requires the TabView to be visible.
         state = self._windows.get(win)
-        if state and self._set_stack_visible_child(state, STACK_FILES, "open_tab show files"):
+        if state and self._set_visible_view(state, VIEW_FILES, "open_tab show files"):
             self._stop_usage_poll_if_idle()
 
         attempt = [0]
@@ -2585,7 +2585,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         def _on_computer_right_clicked(gesture, _n, x, y):
             gesture.set_state(Gtk.EventSequenceState.CLAIMED)
 
-            on_computer = self._windows.get(win, {}).get("visible_child") == STACK_DISKINFO
+            on_computer = self._windows.get(win, {}).get("visible_view") == VIEW_DISKINFO
 
             menu = Gio.Menu()
             ag = Gio.SimpleActionGroup()

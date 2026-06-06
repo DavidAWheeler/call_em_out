@@ -988,7 +988,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             attempts[0] += 1
             # Hold off until the widget tree exists AND the first load has
             # settled (title resolved to a real location, not "Loading…").
-            if _is_unsettled_title(win.get_title() or ""):
+            # Also enforce a minimum delay of at least 25 attempts (500ms) to ensure
+            # Nautilus has finished loading the window layout, popovers, and menus.
+            if _is_unsettled_title(win.get_title() or "") or attempts[0] < 25:
                 if attempts[0] > _WIN_INIT_MAX_ATTEMPTS:
                     # Window never settled (rare) — inject anyway so the
                     # extension still works; route through the low-prio idle.
@@ -1073,14 +1075,25 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             return False
         return True
 
-    def _trace_stack_set(self, stack: Gtk.Stack, name: str, site: str) -> None:
+    def _trace_stack_set(self, stack: Gtk.Widget, name: str, site: str) -> None:
         _log(f"{site}: set_visible_child_name('{name}') on {type(stack).__name__}@0x{id(stack):x}")
 
     def _set_stack_visible_child(self, state: dict, name: str, site: str) -> bool:
         if not self._has_live_stack(state, site):
             return False
+        files_widget = state.get("files_widget")
+        panel = state.get("panel")
+        if files_widget is None or panel is None:
+            return False
+
         self._trace_stack_set(state["stack"], name, site)
-        state["stack"].set_visible_child_name(name)
+        if name == STACK_FILES:
+            files_widget.set_visible(True)
+            panel.set_visible(False)
+        else:
+            files_widget.set_visible(False)
+            panel.set_visible(True)
+
         state["visible_child"] = name
         return True
 
@@ -1454,12 +1467,14 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                     break
 
         panel, grid_host, grid_box = self._build_panel(nautilus_win)
-        stack = Gtk.Stack()
+        # Instead of Gtk.Stack, we use a Gtk.Box to hold the files view and our panel.
+        # This prevents GTK/Nautilus from mistaking our container for the view's internal GtkStack,
+        # which causes assertion failures and segfaults on GNOME 43+ during menu updates.
+        stack = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        stack.set_hexpand(True)
+        stack.set_vexpand(True)
 
-        # Always start on STACK_FILES. Selecting STACK_DISKINFO here (during
-        # ToolbarView replacement) triggered a GTK_IS_STACK assertion and the
-        # startup UAF crash — the stack isn't settled until _on_title_changed()
-        # fires after Nautilus completes its location resolution.
+        # Always start on STACK_FILES.
         initial_child = STACK_FILES
 
         if toolbar_view:
@@ -1467,30 +1482,25 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             if not files_widget:
                 return False
             toolbar_view.set_content(stack)
-            stack.add_named(files_widget, STACK_FILES)
-            stack.add_named(panel, STACK_DISKINFO)
-            self._trace_stack_set(stack, initial_child, "inject_stack toolbar initial")
-            stack.set_visible_child_name(initial_child)
+            stack.append(files_widget)
+            stack.append(panel)
         else:
             files_widget = right
             if not files_widget:
                 return False
             split_view.set_content(stack)
-            stack.add_named(files_widget, STACK_FILES)
-            stack.add_named(panel, STACK_DISKINFO)
-            self._trace_stack_set(stack, initial_child, "inject_stack split initial")
-            stack.set_visible_child_name(initial_child)
+            stack.append(files_widget)
+            stack.append(panel)
 
-        # No transition: a crossfade blends the two children for its duration,
-        # and when switching to the panel the file view underneath is already
-        # showing the native computer:/// content — that blend is the flash.
-        # An instant swap replaces the frame cleanly with nothing to reveal.
-        stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        self._trace_stack_set(stack, initial_child, "inject_stack initial")
+        files_widget.set_visible(initial_child == STACK_FILES)
+        panel.set_visible(initial_child == STACK_DISKINFO)
 
         self._windows[nautilus_win] = {
             "stack": stack,
             "stack_alive": True,
             "visible_child": initial_child,
+            "files_widget": files_widget,
             "panel": panel,
             "grid_host": grid_host,
             "grid_box": grid_box,

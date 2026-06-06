@@ -43,9 +43,29 @@ def _(text: str) -> str:
 DEBUG_LOG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 DEBUG_LOG_PREFIX = "MyComputer"  # prefix for all debug lines, to make them easy to filter in logs
 
+
+# ── Per-site injection toggles (debugging) ────────────────────────────────────
+# We catch/inject into Nautilus at four independent sites. Each flag gates EVERY
+# entry point for that site so a site can be fully isolated while debugging the
+# Nautilus templates-menu use-after-free (crash on navigation with non-empty
+# ~/Templates). Set to False to disable that site entirely. Env override:
+# e.g. MC_MAIN_VIEW=0. Default all on.
+def _flag(name: str, default: bool = True) -> bool:
+    v = os.environ.get(name)
+    if v is None:
+        return default
+    return v.lower() in ("1", "true", "yes", "on")
+
+
+DEBUG_MAIN_VIEW_ACTIVE = _flag("MC_MAIN_VIEW")  # main view: panel overlay over the file view
+DEBUG_COMPUTER_BUTTON_ACTIVE = _flag("MC_COMPUTER_BUTTON")  # left sidebar: "Computer" row injection
+DEBUG_PATHBAR_ACTIVE = _flag("MC_PATHBAR")  # top URL bar: chip icon pinning
+DEBUG_SORT_WATCH_ACTIVE = _flag("MC_SORT_WATCH")  # top view-mode/sort buttons: sort metadata watch
+DEBUG_SELFTEST = _flag("MC_SELFTEST", default=False)  # in-process navigation self-test driver
+
 # ── Extension metadata (keep in sync with pyproject.toml) ────────────────────
 EXT_NAME = "My Computer for Nautilus"
-EXT_VERSION = "0.3.1"
+EXT_VERSION = "0.4.0"
 EXT_AUTHOR = "Yann Masoch"
 EXT_LICENSE = "MIT"
 EXT_GITHUB = "https://github.com/yannmasoch/nautilus-my-computer"
@@ -58,8 +78,8 @@ MENU_ITEM_LABEL = _("My Computer Settings")
 PREFS_WIN_TITLE = _("My Computer Settings")
 SCHEMA_ID = "io.github.yannmasoch.nautilus-my-computer"
 
-STACK_FILES = "files"  # name of the normal file-browser child in our Gtk.Stack
-STACK_DISKINFO = "diskinfo"  # name of our custom panel child in our Gtk.Stack
+VIEW_FILES = "files"  # visible_view token — files view (Overlay base)
+VIEW_DISKINFO = "diskinfo"  # visible_view token — our panel (Overlay child)
 
 METADATA_SORT_BY = "metadata::nautilus-icon-view-sort-by"
 METADATA_SORT_REVERSED = "metadata::nautilus-icon-view-sort-reversed"
@@ -155,6 +175,9 @@ NETWORK_FSTYPES = {
 
 OPTICAL_FSTYPES = {"iso9660", "udf"}
 
+# Internal sentinel values used for fstype — not shown in UI
+_INTERNAL_FSTYPES = {"gvfs", "unmounted", "network-place"}
+
 # Mountpoint prefixes that indicate removable / external media
 EXTERNAL_PREFIXES = ("/media/", "/run/media/", "/mnt/")
 
@@ -188,7 +211,7 @@ class MountInfo:
 
     # Flags
     is_gio: bool = False
-    is_unmounted: bool = False
+    is_mounted: bool = True
     is_removable: bool = False
     can_eject: bool = False
     is_network_place: bool = False
@@ -223,6 +246,17 @@ def _gicon_renders(gicon) -> bool:
     return True
 
 
+def _read_os_name() -> str:
+    try:
+        with open("/etc/os-release") as f:
+            for line in f:
+                if line.startswith("PRETTY_NAME="):
+                    return line.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return ""
+
+
 def _build_uuid_map() -> dict[str, str]:
     """Return {real_device_path: uuid_string} from /dev/disk/by-uuid."""
     result: dict[str, str] = {}
@@ -242,11 +276,11 @@ def _build_uuid_map() -> dict[str, str]:
 
 
 def _classify_mount(m: MountInfo) -> str:
-    """Return 'system', 'external', 'removable', or 'network' for a mount entry."""
+    """Return 'local', 'removable', 'disc', or 'network' for a mount entry."""
     # Unmounted volumes are never part of the running system.
-    # Removable (USB, optical) → "Removable Devices"; others → "Devices and Drives"
-    if m.is_unmounted:
-        return "removable" if m.is_removable else "external"
+    # Removable (USB, optical) → "Removable Devices"; others → "On this computer"
+    if not m.is_mounted:
+        return "removable" if m.is_removable else "local"
 
     # GVfs mounts — phones/cameras (MTP, PTP) go to removable; rest are network
     if m.is_gio:
@@ -258,23 +292,36 @@ def _classify_mount(m: MountInfo) -> str:
     if m.fstype in OPTICAL_FSTYPES:
         return "disc"
 
-    # Removable-media paths always → check removable flag first, then external.
+    # Removable-media paths always → check removable flag first, then local.
     # This ensures NTFS/fuseblk drives at /run/media/ are not misclassified
     # as network just because their fstype starts with "fuse".
     if any(m.mountpoint.startswith(p) for p in EXTERNAL_PREFIXES):
-        return "removable" if m.is_removable else "external"
+        return "removable" if m.is_removable else "local"
 
     # x-gvfs-show fstab entries and known network fstypes → network
     if "x-gvfs-show" in m.opts or m.fstype in NETWORK_FSTYPES or m.fstype.startswith("fuse"):
         return "network"
 
-    return "system"
+    return "local"
+
+
+def _get_local_mount_tier(m: MountInfo) -> tuple[int, str]:
+    """Return (tier, name) for hierarchical sorting within 'local' group.
+    Tier: 0=root, 1=system partitions, 2=mounted, 3=unmounted
+    Used by 'sort by type' mode."""
+    name = (m.display_name or "").lower()
+    if m.mountpoint == "/":
+        return (0, name)
+    if m.mountpoint in ("/boot", "/boot/efi", "/efi") or m.fstype == "swap":
+        return (1, name)
+    if m.is_mounted:
+        return (2, name)
+    return (3, name)
 
 
 # Icon per group category
 _GROUP_ICON = {
-    "system": "drive-harddisk",
-    "external": "drive-harddisk",
+    "local": "drive-harddisk",
     "removable": "drive-removable-media",
     "disc": "media-optical",
     "network": "folder-remote",
@@ -282,8 +329,7 @@ _GROUP_ICON = {
 
 # Display names and order for the groups
 _GROUPS: list[tuple[str, str]] = [
-    ("system", "System"),
-    ("external", "Devices and Drives"),
+    ("local", "On this computer"),
     ("removable", "Removable Devices"),
     ("disc", "Disc Images"),
     ("network", "Network Volumes"),
@@ -416,15 +462,18 @@ def _format_size(n: float) -> str:
     return f"{n:.1f} EB"
 
 
-def _scan_mounts() -> list[MountInfo]:
+def _scan_mounts(hide_boot_efi: bool = False) -> list[MountInfo]:
     mounts: list[MountInfo] = []
     seen: set[str] = set()
     uuid_map = _build_uuid_map()
 
     # Build mountpoint → Gio.Icon / Gio.Mount from VolumeMonitor so we can
     # attach the real hardware icon and GIO handle to each /proc/mounts entry.
+    # Also build a UUID fallback for mounts whose root path doesn't match the
+    # /proc/mounts mountpoint (e.g. root on LUKS/dm-crypt).
     icon_by_path: dict[str, Gio.Icon] = {}
     mount_by_path: dict[str, object] = {}
+    mount_by_uuid: dict[str, object] = {}
     try:
         vm = Gio.VolumeMonitor.get()
         for gm in vm.get_mounts():
@@ -433,6 +482,11 @@ def _scan_mounts() -> list[MountInfo]:
             if path:
                 icon_by_path[path] = gm.get_icon()
                 mount_by_path[path] = gm
+            vol = gm.get_volume()
+            if vol:
+                uid = vol.get_identifier(Gio.VOLUME_IDENTIFIER_KIND_UUID)
+                if uid:
+                    mount_by_uuid[uid] = gm
     except Exception:
         pass
 
@@ -452,17 +506,26 @@ def _scan_mounts() -> list[MountInfo]:
                     fstype not in REAL_FSTYPES and not gvfs_show and not is_external
                 ) or device in seen:
                     continue
+                if hide_boot_efi and mountpoint in ("/boot", "/boot/efi", "/efi"):
+                    continue
                 seen.add(device)
                 try:
                     st = os.statvfs(mountpoint)
                     total = st.f_blocks * st.f_frsize
                     free = st.f_bavail * st.f_frsize
-                    name = os.path.basename(mountpoint) or "/"
-                    gio_mount = mount_by_path.get(mountpoint)
-                    gio_volume = gio_mount.get_volume() if gio_mount else None
-                    gio_drive = gio_volume.get_drive() if gio_volume else None
                     real_dev = os.path.realpath(device)
                     uuid = uuid_map.get(real_dev)
+                    gio_mount = mount_by_path.get(mountpoint) or (
+                        mount_by_uuid.get(uuid) if uuid else None
+                    )
+                    name = (
+                        (gio_mount.get_name() if gio_mount else None)
+                        or (mountpoint == "/" and _read_os_name())
+                        or os.path.basename(mountpoint)
+                        or "/"
+                    )
+                    gio_volume = gio_mount.get_volume() if gio_mount else None
+                    gio_drive = gio_volume.get_drive() if gio_volume else None
                     key = f"uuid:{uuid}" if uuid else device
                     mounts.append(
                         MountInfo(
@@ -584,7 +647,7 @@ def _scan_gio_volumes() -> list[MountInfo]:
                     free=0,
                     display_name=name,
                     nav_uri="",
-                    is_unmounted=True,
+                    is_mounted=False,
                     is_removable=is_removable,
                     gio_icon=volume.get_icon(),
                     gio_volume=volume,
@@ -829,7 +892,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
     def __init__(self):
         super().__init__()
         # Maps each NautilusWindow to its per-window state dict:
-        #   stack, panel, content_box, force_disks, initial_title
+        #   overlay, panel, content_box, force_disks, initial_title
         self._windows: dict = {}
         self._polling_started = False
         self._refresh_pending = False  # debounce flag for live-refresh
@@ -863,7 +926,10 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         else:
             self._start_on_disks = False
 
-        _refresh(_scan_mounts() + _scan_gio_mounts() + _scan_gio_volumes())
+        _hide_boot_efi = (
+            self._gsettings.get_boolean("hide-system-partitions") if self._gsettings else False
+        )
+        _refresh(_scan_mounts(_hide_boot_efi) + _scan_gio_mounts() + _scan_gio_volumes())
 
         # Watch /proc/mounts at the kernel level — POLLPRI fires on any
         # mount/unmount regardless of how it happened (udisks, manual, FUSE…)
@@ -922,7 +988,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         """Wait for the window's first view load to settle, then inject on a
         low-priority idle.
 
-        Injecting our Gtk.Stack reparents the AdwToolbarView content. Doing that
+        Injecting our Gtk.Overlay reparents the AdwToolbarView content. Doing that
         during Nautilus's files_view_begin_loading races with its templates
         context-menu rebuild: with a non-empty ~/Templates,
         slot_on_templates_menu_changed rebuilds a GtkPopoverMenu whose internal
@@ -942,7 +1008,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             attempts[0] += 1
             # Hold off until the widget tree exists AND the first load has
             # settled (title resolved to a real location, not "Loading…").
-            if _is_unsettled_title(win.get_title() or ""):
+            # Also enforce a minimum delay of at least 25 attempts (500ms) to ensure
+            # Nautilus has finished loading the window layout, popovers, and menus.
+            if _is_unsettled_title(win.get_title() or "") or attempts[0] < 25:
                 if attempts[0] > _WIN_INIT_MAX_ATTEMPTS:
                     # Window never settled (rare) — inject anyway so the
                     # extension still works; route through the low-prio idle.
@@ -972,16 +1040,56 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         if self._bar_css_display is None:
             self._bar_css_display = display
             self._apply_bar_color()
-        if self._inject_stack(win):
+        if self._inject_overlay(win):
             win.connect("destroy", self._on_window_destroyed)
             win.connect("notify::title", self._on_title_changed)
 
-            self._inject_sidebar_link(win)
-            self._attach_pathbar(win)
+            if DEBUG_COMPUTER_BUTTON_ACTIVE:
+                self._inject_sidebar_link(win)
             self._on_title_changed(win, None)
+
+            if DEBUG_SELFTEST and not getattr(self, "_selftest_started", False):
+                self._selftest_started = True
+                GLib.timeout_add(3000, lambda: self._run_selftest(win))
 
             return True
         return False
+
+    def _run_selftest(self, win) -> bool:
+        """Debug-only: drive in-process navigation (no keyboard/focus needed) so
+        the templates-menu crash can be reproduced deterministically."""
+        home = os.path.expanduser
+        steps = [
+            DISKS_URI,
+            Gio.File.new_for_path(home("~/Downloads")).get_uri(),
+            DISKS_URI,
+            Gio.File.new_for_path(home("~/Documents")).get_uri(),
+            DISKS_URI,
+            Gio.File.new_for_path(home("~/Downloads")).get_uri(),
+        ]
+        idx = [0]
+
+        def step():
+            if win not in self._windows:
+                _log("SELFTEST: window gone")
+                return GLib.SOURCE_REMOVE
+            if idx[0] >= len(steps):
+                _log("SELFTEST DONE: survived all navigations")
+                return GLib.SOURCE_REMOVE
+            uri = steps[idx[0]]
+            idx[0] += 1
+            _log(f"SELFTEST step -> {uri}")
+            for w in _all_widgets(win):
+                if "Slot" in type(w).__name__:
+                    try:
+                        if w.activate_action("open-location", GLib.Variant("s", uri)):
+                            break
+                    except Exception:
+                        pass
+            return GLib.SOURCE_CONTINUE
+
+        GLib.timeout_add(2500, step)
+        return GLib.SOURCE_REMOVE
 
     def _check_new_windows(self) -> bool:
         toplevels = Gtk.Window.list_toplevels()
@@ -1001,41 +1109,58 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         state = self._windows.pop(win, None)
         if state:
             tick_id = state.get("stale_release_tick_id")
-            stack = state.get("stack")
-            if tick_id is not None and stack is not None and hasattr(stack, "remove_tick_callback"):
-                stack.remove_tick_callback(tick_id)
+            overlay = state.get("overlay")
+            if (
+                tick_id is not None
+                and overlay is not None
+                and hasattr(overlay, "remove_tick_callback")
+            ):
+                overlay.remove_tick_callback(tick_id)
             state["stale_release_tick_id"] = None
             state["stale_release_ticks"] = 0
             state.get("stale_generations", []).clear()
         # Stop usage poll workers if this was the last window showing our panel.
         self._stop_usage_poll_if_idle()
 
-    def _on_stack_finalized(self, win: Gtk.Window, state: dict) -> None:
-        if state.get("stack") is None and not state.get("stack_alive", True):
+    def _on_overlay_finalized(self, win: Gtk.Window, state: dict) -> None:
+        if state.get("overlay") is None and not state.get("overlay_alive", True):
             return
-        was_visible = state.get("visible_child") == STACK_DISKINFO
-        state["stack"] = None
-        state["stack_alive"] = False
-        state["visible_child"] = None
-        _log(f"stack finalized before window destroy for {type(win).__name__}")
+        was_visible = state.get("visible_view") == VIEW_DISKINFO
+        state["overlay"] = None
+        state["overlay_alive"] = False
+        state["visible_view"] = None
+        _log(f"overlay finalized before window destroy for {type(win).__name__}")
         if was_visible:
             GLib.idle_add(self._stop_usage_poll_if_idle)
 
-    def _has_live_stack(self, state: dict, site: str) -> bool:
-        if state.get("stack") is None or not state.get("stack_alive", True):
-            _log(f"{site}: skip dead stack")
+    def _has_live_overlay(self, state: dict, site: str) -> bool:
+        if state.get("overlay") is None or not state.get("overlay_alive", True):
+            _log(f"{site}: skip dead overlay")
             return False
         return True
 
-    def _trace_stack_set(self, stack: Gtk.Stack, name: str, site: str) -> None:
-        _log(f"{site}: set_visible_child_name('{name}') on {type(stack).__name__}@0x{id(stack):x}")
+    def _trace_view_set(self, overlay: Gtk.Widget, name: str, site: str) -> None:
+        _log(f"{site}: show view '{name}' on {type(overlay).__name__}@0x{id(overlay):x}")
 
-    def _set_stack_visible_child(self, state: dict, name: str, site: str) -> bool:
-        if not self._has_live_stack(state, site):
+    def _set_visible_view(self, state: dict, name: str, site: str) -> bool:
+        if not self._has_live_overlay(state, site):
             return False
-        self._trace_stack_set(state["stack"], name, site)
-        state["stack"].set_visible_child_name(name)
-        state["visible_child"] = name
+        panel = state.get("panel")
+        if panel is None:
+            return False
+
+        self._trace_view_set(state["overlay"], name, site)
+        # files_widget is the always-present Overlay base — never hidden (hiding
+        # it would reparent/unmap and risk the GTK_IS_STACK crash). Toggle only
+        # the panel overlay's visibility. The panel is opaque and FILL/FILL, so
+        # it absorbs all pointer events without needing set_sensitive() on the
+        # base. Keyboard type-ahead is blocked separately by the capture-phase
+        # key guard (_on_window_key_capture). Do NOT call set_sensitive() on the
+        # base (AdwTabView): it covers all tabs, so toggling it disrupts Nautilus
+        # keyboard controllers on other tabs and causes freezes in multi-tab.
+        panel.set_visible(name == VIEW_DISKINFO)
+
+        state["visible_view"] = name
         return True
 
     def _on_settings_changed(self, settings: Gio.Settings, key: str) -> None:
@@ -1043,6 +1168,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             self._start_on_disks = settings.get_boolean(key)
         elif key in ("color-mode", "custom-color", "gradient-color-1", "gradient-color-2"):
             self._apply_bar_color()
+        elif key == "hide-system-partitions":
+            self._schedule_live_refresh()
 
     def _apply_bar_color(self) -> None:
         if not self._gsettings or self._bar_css_display is None:
@@ -1142,9 +1269,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
     def _on_sort_button_active(self, btn: Gtk.MenuButton, _param, nautilus_win: Gtk.Window) -> None:
         state = self._windows.get(nautilus_win)
-        if not state or not self._has_live_stack(state, "sort button"):
+        if not state or not self._has_live_overlay(state, "sort button"):
             return
-        if state.get("visible_child") != STACK_DISKINFO:
+        if state.get("visible_view") != VIEW_DISKINFO:
             return
         if btn.get_active():
             self._sort_hover = True
@@ -1211,7 +1338,10 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
     def _do_live_refresh(self) -> bool:
         self._refresh_pending = False
-        _refresh(_scan_mounts() + _scan_gio_mounts() + _scan_gio_volumes())
+        _hide_boot_efi = (
+            self._gsettings.get_boolean("hide-system-partitions") if self._gsettings else False
+        )
+        _refresh(_scan_mounts(_hide_boot_efi) + _scan_gio_mounts() + _scan_gio_volumes())
         # Re-discover network places in background; callback will repopulate
         _refresh_network_places(on_done=self._repopulate_visible)
         self._repopulate_visible()
@@ -1220,9 +1350,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
     def _repopulate_visible(self) -> bool:
         """Repopulate whichever windows are showing the disk view."""
         for win, state in list(self._windows.items()):
-            if not self._has_live_stack(state, "repopulate_visible"):
+            if not self._has_live_overlay(state, "repopulate_visible"):
                 continue
-            if state.get("visible_child") == STACK_DISKINFO:
+            if state.get("visible_view") == VIEW_DISKINFO:
                 self._populate(win)
         return GLib.SOURCE_REMOVE
 
@@ -1234,7 +1364,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         the main thread in _apply_usage_updates via dataclasses.replace)."""
         updates: dict[str, tuple[int, int]] = {}
         for key, m in list(_disk_data.items()):
-            if m.is_gio or m.is_unmounted or not m.mountpoint:
+            if m.is_gio or not m.is_mounted or not m.mountpoint:
                 continue
             try:
                 st = os.statvfs(m.mountpoint)
@@ -1332,9 +1462,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                 continue
             _disk_data[key] = dataclasses.replace(_disk_data[key], total=total, free=free)
             for state in self._windows.values():
-                if not self._has_live_stack(state, "apply_usage_updates"):
+                if not self._has_live_overlay(state, "apply_usage_updates"):
                     continue
-                if state.get("visible_child") != STACK_DISKINFO:
+                if state.get("visible_view") != VIEW_DISKINFO:
                     continue
                 self._update_card_usage(state, key, total, free)
         return GLib.SOURCE_REMOVE
@@ -1348,7 +1478,11 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         if bar is not None and total > 0:
             bar.set_value(min(1.0, (total - free) / total))
         if sub is not None and total > 0:
-            sub.set_label(f"{_format_size(free)} free of {_format_size(total)}")
+            sub.set_label(
+                _("{free} free of {total}").format(
+                    free=_format_size(free), total=_format_size(total)
+                )
+            )
 
     def _ensure_usage_poll_running(self) -> None:
         """Arm both usage poll workers if not already running."""
@@ -1364,9 +1498,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
     def _stop_usage_poll_if_idle(self) -> None:
         """Disarm poll workers when no window is showing the disk panel."""
         any_visible = any(
-            st.get("stack") is not None
-            and st.get("stack_alive", True)
-            and st.get("visible_child") == STACK_DISKINFO
+            st.get("overlay") is not None
+            and st.get("overlay_alive", True)
+            and st.get("visible_view") == VIEW_DISKINFO
             for st in self._windows.values()
         )
         if not any_visible:
@@ -1380,14 +1514,14 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                 self._net_poll_cancellable.cancel()
                 self._net_poll_cancellable = None
 
-    def _inject_stack(self, nautilus_win: Gtk.Window) -> bool:
+    def _inject_overlay(self, nautilus_win: Gtk.Window) -> bool:
         split_view = None
         for w in _all_widgets(nautilus_win):
             if isinstance(w, Adw.OverlaySplitView):
                 split_view = w
                 break
         if not split_view:
-            _log("inject_stack: Adw.OverlaySplitView not found — widget tree may have changed")
+            _log("inject_overlay: Adw.OverlaySplitView not found — widget tree may have changed")
             return False
 
         toolbar_view = None
@@ -1399,43 +1533,46 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                     break
 
         panel, grid_host, grid_box = self._build_panel(nautilus_win)
-        stack = Gtk.Stack()
+        # Use Gtk.Overlay: files view is the always-present base; our panel floats
+        # on top as an overlay child, visible only on computer:///. The Overlay type
+        # is opaque to Nautilus's gtk_widget_get_ancestor(view, GTK_TYPE_STACK) walk,
+        # so it never confuses Nautilus's internal view GtkStack (unlike a Gtk.Stack
+        # wrapper, which caused the GTK_IS_STACK assertion / SIGSEGV on GNOME 43+).
+        overlay = Gtk.Overlay()
 
-        # Always start on STACK_FILES. Selecting STACK_DISKINFO here (during
-        # ToolbarView replacement) triggered a GTK_IS_STACK assertion and the
-        # startup UAF crash — the stack isn't settled until _on_title_changed()
-        # fires after Nautilus completes its location resolution.
-        initial_child = STACK_FILES
+        # Panel must fill the full Overlay area so the files view doesn't show through.
+        panel.set_halign(Gtk.Align.FILL)
+        panel.set_valign(Gtk.Align.FILL)
 
-        if toolbar_view:
+        if not DEBUG_MAIN_VIEW_ACTIVE:
+            # Main-view site disabled: keep the overlay/panel ORPHAN (never inserted
+            # into Nautilus's tree) so other sites can still be exercised/isolated.
+            files_widget = None
+            _log("inject_overlay: DEBUG_MAIN_VIEW_ACTIVE=False — overlay kept orphan")
+        elif toolbar_view:
             files_widget = toolbar_view.get_content()
             if not files_widget:
                 return False
-            toolbar_view.set_content(stack)
-            stack.add_named(files_widget, STACK_FILES)
-            stack.add_named(panel, STACK_DISKINFO)
-            self._trace_stack_set(stack, initial_child, "inject_stack toolbar initial")
-            stack.set_visible_child_name(initial_child)
+            toolbar_view.set_content(overlay)
+            overlay.set_child(files_widget)
+            overlay.add_overlay(panel)
         else:
             files_widget = right
             if not files_widget:
                 return False
-            split_view.set_content(stack)
-            stack.add_named(files_widget, STACK_FILES)
-            stack.add_named(panel, STACK_DISKINFO)
-            self._trace_stack_set(stack, initial_child, "inject_stack split initial")
-            stack.set_visible_child_name(initial_child)
+            split_view.set_content(overlay)
+            overlay.set_child(files_widget)
+            overlay.add_overlay(panel)
 
-        # No transition: a crossfade blends the two children for its duration,
-        # and when switching to the panel the file view underneath is already
-        # showing the native computer:/// content — that blend is the flash.
-        # An instant swap replaces the frame cleanly with nothing to reveal.
-        stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        # Start with the files view — panel hidden until title changes to computer:///.
+        self._trace_view_set(overlay, VIEW_FILES, "inject_overlay initial")
+        panel.set_visible(False)
 
         self._windows[nautilus_win] = {
-            "stack": stack,
-            "stack_alive": True,
-            "visible_child": initial_child,
+            "overlay": overlay,
+            "overlay_alive": True,
+            "visible_view": VIEW_FILES,
+            "files_widget": files_widget,
             "panel": panel,
             "grid_host": grid_host,
             "grid_box": grid_box,
@@ -1452,15 +1589,49 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             "selected_key": None,
             "header_motion": None,  # Gtk.EventControllerMotion on the header bar
         }
-        stack.weak_ref(
+        overlay.weak_ref(
             lambda w=nautilus_win, st=self._windows.get(nautilus_win): (
-                self._on_stack_finalized(w, st) if st is not None else None
+                self._on_overlay_finalized(w, st) if st is not None else None
             )
         )
+
+        # Capture-phase key guard on the window: Nautilus's "type to search"
+        # type-ahead is hooked above keyboard focus, so neither hiding nor
+        # de-focusing the covered file view stops it. A controller at the top of
+        # the capture chain sees keystrokes first and swallows plain printable
+        # ones while the panel is shown — so typing doesn't reopen the vanilla
+        # computer:/// search. Modified shortcuts (Ctrl/Alt/Super) and control
+        # keys (arrows, Tab, Enter, Esc) always pass through.
+        key_guard = Gtk.EventControllerKey()
+        key_guard.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        key_guard.connect("key-pressed", self._on_window_key_capture, nautilus_win)
+        nautilus_win.add_controller(key_guard)
 
         # If this window is headed to computer:///, let the later title-change
         # path do the first populate + switch once Nautilus has settled.
 
+        return True
+
+    def _on_window_key_capture(self, _ctrl, keyval, _keycode, gtk_state, win) -> bool:
+        """Swallow plain printable keystrokes while our panel is shown, so
+        Nautilus's window-level type-ahead search doesn't reopen the file view."""
+        state = self._windows.get(win)
+        if not state or state.get("visible_view") != VIEW_DISKINFO:
+            return False
+        # Let modified shortcuts through (Ctrl+L, Alt+Left, Super, …).
+        if gtk_state & (
+            Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SUPER_MASK
+        ):
+            return False
+        # Only swallow printable characters (>= space). Control keys — arrows,
+        # Tab, Enter, Esc, function keys — map to unicode < 0x20 and pass through.
+        if Gdk.keyval_to_unicode(keyval) < 0x20:
+            return False
+        # If the user opened a text entry (Ctrl+L location bar, Ctrl+F search),
+        # the focused widget is an Editable — let it receive the keystroke.
+        focused = win.get_focus()
+        if focused is not None and isinstance(focused, Gtk.Editable):
+            return False
         return True
 
     # ── Panel construction ────────────────────────────────────────────────────
@@ -1488,7 +1659,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         if state.get("stale_release_tick_id") is not None:
             return
 
-        owner = state.get("stack")
+        owner = state.get("overlay")
         if owner is None or not hasattr(owner, "add_tick_callback"):
             GLib.timeout_add(50, lambda st=state: self._release_stale_generations(st))
             return
@@ -1535,8 +1706,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         # Classify
         by_group: dict[str, list] = {
-            "system": [],
-            "external": [],
+            "local": [],
             "removable": [],
             "disc": [],
             "network": [],
@@ -1555,23 +1725,26 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         def _sort_key(m: MountInfo):
             if col == "size":
                 return m.total
-            elif col == "type":
-                return m.fstype
             else:
                 return (m.display_name or "").lower()
 
-        for gkey in ("system", "external", "removable", "disc", "network"):
+        for gkey in ("local", "removable", "disc", "network"):
             items = by_group[gkey]
-            if gkey == "system":
-                root_items = [m for m in items if m.mountpoint == "/"]
-                mounted_items = [m for m in items if m.mountpoint != "/" and not m.is_unmounted]
-                unmounted = [m for m in items if m.is_unmounted]
-                mounted_items.sort(key=_sort_key, reverse=rev)
-                unmounted.sort(key=_sort_key, reverse=rev)
-                by_group[gkey] = root_items + mounted_items + unmounted
-            elif gkey in ("external", "removable"):
-                mounted_items = [m for m in items if not m.is_unmounted]
-                unmounted = [m for m in items if m.is_unmounted]
+            if gkey == "local":
+                if col == "type":
+                    # Sort by type: root → system partitions → mounted → unmounted
+                    items.sort(key=_get_local_mount_tier, reverse=False)
+                else:
+                    # For any sort mode: mounted first, then unmounted (always last)
+                    mounted_items = [m for m in items if m.is_mounted]
+                    unmounted = [m for m in items if not m.is_mounted]
+                    mounted_items.sort(key=_sort_key, reverse=rev)
+                    unmounted.sort(key=_sort_key, reverse=rev)
+                    items = mounted_items + unmounted
+                by_group[gkey] = items
+            elif gkey == "removable":
+                mounted_items = [m for m in items if m.is_mounted]
+                unmounted = [m for m in items if not m.is_mounted]
                 mounted_items.sort(key=_sort_key, reverse=rev)
                 unmounted.sort(key=_sort_key, reverse=rev)
                 by_group[gkey] = mounted_items + unmounted
@@ -1640,13 +1813,12 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         card.get_style_context().add_class("nautilus-view-cell")
-        if m.is_unmounted:
+        if not m.is_mounted:
             card.get_style_context().add_class("unmounted")
         card.set_margin_start(6)
         card.set_margin_end(6)
         card.set_margin_top(6)
         card.set_margin_bottom(6)
-        card.set_cursor(Gdk.Cursor.new_from_name("pointer"))
         card.set_focusable(True)
         card.set_focus_on_click(True)
 
@@ -1678,7 +1850,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         bar.get_style_context().add_class("diskinfo-bar")
 
         has_size = m.total > 0
-        if m.is_unmounted:
+        if not m.is_mounted:
             bar.set_visible(False)
             sub_text = _("Not mounted")
         elif has_size:
@@ -1702,6 +1874,10 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         details.append(sub_lbl)
 
         card.append(details)
+
+        if m.mountpoint:
+            fstype_part = f" ({m.fstype})" if m.fstype and m.fstype not in _INTERNAL_FSTYPES else ""
+            card.set_tooltip_text(f"{m.mountpoint}{fstype_part}")
 
         card._mount_key = m.key
         card._nav_uri = nav_uri
@@ -1731,7 +1907,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         mount_key = getattr(card, "_mount_key", None)
         m = _disk_data.get(mount_key) if mount_key else None
         nav_uri = getattr(card, "_nav_uri", "")
-        if m and m.is_unmounted:
+        if m and not m.is_mounted:
             self._do_mount(m, win)
             return
         GLib.idle_add(self._navigate_to, nav_uri, win)
@@ -1759,24 +1935,21 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         state = self._windows.get(win)
         if not state:
             return
-        if not self._has_live_stack(state, "title changed"):
+        if not self._has_live_overlay(state, "title changed"):
             return
-
-        if not state.get("pathbar"):
-            self._attach_pathbar(win)
 
         current_title = win.get_title() or ""
         in_view = _LOCATION_TITLE in current_title
 
         # A transient/empty title ("Loading…") means the window hasn't resolved
         # its location yet. Never act on it: it must not consume the one-shot
-        # start-on-computer flag, nor flip the stack to the file view.
+        # start-on-computer flag, nor flip the overlay to the file view.
         if _is_unsettled_title(current_title):
             return
 
         # While the startup navigation to computer:/// is still in flight, keep
         # the panel pinned. Intermediate titles (e.g. a lingering "Home") must
-        # not flip the stack to the file view and cause a flash.
+        # not flip the overlay to the file view and cause a flash.
         if state.get("awaiting_disks"):
             if in_view:
                 state["awaiting_disks"] = False  # arrived, fall through
@@ -1797,13 +1970,11 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             else:
                 in_view = True
 
-        current = state.get("visible_child")
+        current = state.get("visible_view")
         if in_view:
-            if current != STACK_DISKINFO:
+            if current != VIEW_DISKINFO:
                 self._populate(win)
-                if not self._set_stack_visible_child(
-                    state, STACK_DISKINFO, "title changed show diskinfo"
-                ):
+                if not self._set_visible_view(state, VIEW_DISKINFO, "title changed show diskinfo"):
                     return
                 self._ensure_usage_poll_running()
                 GLib.idle_add(
@@ -1815,18 +1986,15 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                     GLib.idle_add(lambda lb=sidebar_lb, r=sidebar_row: lb.select_row(r) or False)
 
             # Re-pin the chrome icons (path-bar chip + sidebar row) every time we
-            # arrive at the computer view. This must run even when the stack is
+            # arrive at the computer view. This must run even when the overlay is
             # already showing the panel — on the start-on-disks path the panel is
             # pre-shown before navigation completes, so the chip only gains its
-            # "Computer" label here, after the stack is already DISKINFO.
-            root = state.get("pathbar") or win
-            GLib.idle_add(lambda: self._fix_pathbar_icon(root) or False)
-            # Refresh sort once on arrival, and ensure the header-hover poll that
-            # tracks later sort changes is armed (no-op if already attached).
-            if self._read_sort_metadata():
-                self._populate(win)
-            GLib.idle_add(lambda w=win: self._attach_sort_button_watch(w) or False)
-        elif not in_view and current != STACK_FILES:
+            # "Computer" label here, after the overlay is already DISKINFO.
+            if DEBUG_PATHBAR_ACTIVE:
+                GLib.idle_add(lambda w=win: self._fix_pathbar_icon(w) or False)
+            if DEBUG_SORT_WATCH_ACTIVE:
+                GLib.idle_add(lambda w=win: self._attach_sort_button_watch(w) or False)
+        elif not in_view and current != VIEW_FILES:
             if state:
                 state["_deselecting"] = True
                 for flow in state.get("section_flows", []):
@@ -1836,7 +2004,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             sidebar_lb = state.get("sidebar_listbox")
             if sidebar_lb:
                 GLib.idle_add(lambda lb=sidebar_lb: lb.unselect_all() or False)
-            if not self._set_stack_visible_child(state, STACK_FILES, "title changed show files"):
+            if not self._set_visible_view(state, VIEW_FILES, "title changed show files"):
                 return
             self._stop_usage_poll_if_idle()
 
@@ -1850,22 +2018,22 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         mount_key = getattr(row, "_mount_key", None)
         m = _disk_data.get(mount_key) if mount_key else None
         nav_uri = getattr(row, "_nav_uri", "")
-        is_unmounted = m.is_unmounted if m else False
+        is_mounted = m.is_mounted if m else True
         ctrl_held = bool(state & Gdk.ModifierType.CONTROL_MASK)
         shift_held = bool(state & Gdk.ModifierType.SHIFT_MASK)
         alt_held = bool(state & Gdk.ModifierType.ALT_MASK)
 
         if alt_held and not ctrl_held and not shift_held:
-            if not is_unmounted and nav_uri:
+            if is_mounted and nav_uri:
                 self._do_properties(nav_uri, win)
         elif ctrl_held and not shift_held and not alt_held:
-            if not is_unmounted:
+            if is_mounted:
                 self._do_open_tab(nav_uri, win)
         elif shift_held and not ctrl_held and not alt_held:
-            if not is_unmounted:
+            if is_mounted:
                 self._do_open_window(nav_uri)
         else:
-            if is_unmounted:
+            if not is_mounted:
                 self._do_mount(m, win)
             else:
                 self._do_open(nav_uri, win)
@@ -1885,12 +2053,18 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         mount_key = getattr(row, "_mount_key", None)
         m = _disk_data.get(mount_key) if mount_key else None
         nav_uri = getattr(row, "_nav_uri", "")
-        group = getattr(row, "_disk_group", "system")
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
 
-        is_unmounted = m.is_unmounted if m else False
-        can_eject = m.can_eject if m else False
-        is_system = group == "system"
+        if not m:
+            return
+
+        is_mounted = m.is_mounted
+        is_system = m.mountpoint == "/"
+        device = m.device or ""
+        if not device.startswith("/dev/") and m.gio_volume:
+            unix_dev = m.gio_volume.get_identifier(Gio.VOLUME_IDENTIFIER_KIND_UNIX_DEVICE)
+            if unix_dev:
+                device = unix_dev
 
         def _accel_item(label, action, accel):
             item = Gio.MenuItem.new(label, action)
@@ -1900,76 +2074,74 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         menu = Gio.Menu()
         ag = Gio.SimpleActionGroup()
 
-        # Section 1: primary action(s) — open for mounted, mount for unmounted
-        primary_section = Gio.Menu()
-        if is_unmounted:
-            if not is_system:
-                primary_section.append(_("Mount"), "diskrow.mount")
+        # Section 1: open actions (all disks)
+        open_sec = Gio.Menu()
+        open_sec.append_item(_accel_item(_("Open"), "diskrow.open", "Return"))
+        open_sec.append_item(
+            _accel_item(_("Open in New Tab"), "diskrow.open-tab", "<Control>Return")
+        )
+        open_sec.append_item(
+            _accel_item(_("Open in New Window"), "diskrow.open-window", "<Shift>Return")
+        )
+        menu.append_section(None, open_sec)
+
+        open_act = Gio.SimpleAction.new("open", None)
+        if is_mounted and nav_uri:
+            open_act.connect("activate", lambda *_: self._do_open(nav_uri, win))
+        else:
+            open_act.connect("activate", lambda *_: self._do_mount_then_open(m, win, "current"))
+        ag.add_action(open_act)
+        tab_act = Gio.SimpleAction.new("open-tab", None)
+        if is_mounted and nav_uri:
+            tab_act.connect("activate", lambda *_: self._do_open_tab(nav_uri, win))
+        else:
+            tab_act.connect("activate", lambda *_: self._do_mount_then_open(m, win, "tab"))
+        ag.add_action(tab_act)
+        win_act = Gio.SimpleAction.new("open-window", None)
+        if is_mounted and nav_uri:
+            win_act.connect("activate", lambda *_: self._do_open_window(nav_uri))
+        else:
+            win_act.connect("activate", lambda *_: self._do_mount_then_open(m, win, "window"))
+        ag.add_action(win_act)
+
+        # Section 2: mount / unmount / eject + format (non-system only)
+        if not is_system:
+            mid_sec = Gio.Menu()
+            if not is_mounted:
+                mid_sec.append(_("Mount"), "diskrow.mount")
                 mount_act = Gio.SimpleAction.new("mount", None)
                 mount_act.connect("activate", lambda *_: self._do_mount(m, win))
                 ag.add_action(mount_act)
-        else:
-            primary_section.append_item(_accel_item(_("Open"), "diskrow.open", "Return"))
-            primary_section.append_item(
-                _accel_item(_("Open in New Tab"), "diskrow.open-tab", "<Control>Return")
-            )
-            primary_section.append_item(
-                _accel_item(_("Open in New Window"), "diskrow.open-window", "<Shift>Return")
-            )
-
-            open_act = Gio.SimpleAction.new("open", None)
-            open_act.connect("activate", lambda *_: self._do_open(nav_uri, win))
-            ag.add_action(open_act)
-
-            tab_act = Gio.SimpleAction.new("open-tab", None)
-            tab_act.connect("activate", lambda *_: self._do_open_tab(nav_uri, win))
-            ag.add_action(tab_act)
-
-            win_act = Gio.SimpleAction.new("open-window", None)
-            win_act.connect("activate", lambda *_: self._do_open_window(nav_uri))
-            ag.add_action(win_act)
-
-        if primary_section.get_n_items() > 0:
-            menu.append_section(None, primary_section)
-
-        # Section 2: unmount/eject (mounted non-system only) + preferences
-        mid_section = Gio.Menu()
-        if not is_system and not is_unmounted:
-            if can_eject:
-                mid_section.append(_("Eject"), "diskrow.eject")
+            elif m.can_eject:
+                mid_sec.append(_("Eject"), "diskrow.eject")
                 eject_act = Gio.SimpleAction.new("eject", None)
                 eject_act.connect("activate", lambda *_: self._do_eject(m))
                 ag.add_action(eject_act)
             else:
-                mid_section.append(_("Unmount"), "diskrow.unmount")
+                mid_sec.append(_("Unmount"), "diskrow.unmount")
                 unmount_act = Gio.SimpleAction.new("unmount", None)
                 unmount_act.connect("activate", lambda *_: self._do_unmount(m))
                 ag.add_action(unmount_act)
-        device = m.device if m else ""
-        if not is_system and device.startswith("/dev/"):
-            mid_section.append(_("Format…"), "diskrow.format")
-            fmt_act = Gio.SimpleAction.new("format", None)
-            fmt_act.connect("activate", lambda *_: self._do_format(device))
-            ag.add_action(fmt_act)
+            if device.startswith("/dev/"):
+                mid_sec.append(_("Format…"), "diskrow.format")
+                fmt_act = Gio.SimpleAction.new("format", None)
+                fmt_act.connect("activate", lambda *_: self._do_format(device))
+                ag.add_action(fmt_act)
+            menu.append_section(None, mid_sec)
 
-        if mid_section.get_n_items() > 0:
-            menu.append_section(None, mid_section)
-
-        # Section 3: properties — only for mounted disks with a URI
-        if not is_unmounted and nav_uri:
-            props_section = Gio.Menu()
-            props_section.append_item(_accel_item(_("Properties"), "diskrow.props", "<Alt>Return"))
-            menu.append_section(None, props_section)
-
+        # Section 3: properties (mounted disks only)
+        if is_mounted and nav_uri:
+            props_sec = Gio.Menu()
+            props_sec.append_item(_accel_item(_("Properties"), "diskrow.props", "<Alt>Return"))
+            menu.append_section(None, props_sec)
             props_act = Gio.SimpleAction.new("props", None)
             props_act.connect("activate", lambda *_: self._do_properties(nav_uri, win))
             ag.add_action(props_act)
 
-        row.insert_action_group("diskrow", ag)
-
         popover = Gtk.PopoverMenu.new_from_model(menu)
         popover.set_has_arrow(False)
         popover.set_parent(row)
+        popover.insert_action_group("diskrow", ag)
         rect = Gdk.Rectangle()
         rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
         popover.set_pointing_to(rect)
@@ -1989,7 +2161,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         # Switch to the files view first — new-tab action requires the TabView to be visible.
         state = self._windows.get(win)
-        if state and self._set_stack_visible_child(state, STACK_FILES, "open_tab show files"):
+        if state and self._set_visible_view(state, VIEW_FILES, "open_tab show files"):
             self._stop_usage_poll_if_idle()
 
         attempt = [0]
@@ -2039,6 +2211,36 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             _log(f"mount failed: {e.message}")
         GLib.idle_add(self._repopulate_visible)
 
+    def _do_mount_then_open(self, m: MountInfo, win: Gtk.Window, mode: str) -> None:
+        if not m or not m.gio_volume:
+            return
+        op = Gio.MountOperation.new()
+        op.set_password_save(Gio.PasswordSave.NEVER)
+        m.gio_volume.mount(
+            Gio.MountMountFlags.NONE, op, None, self._on_mount_then_open_finish, (win, mode)
+        )
+
+    def _on_mount_then_open_finish(self, volume, result, user_data) -> None:
+        win, mode = user_data
+        try:
+            volume.mount_finish(result)
+        except GLib.Error as e:
+            _log(f"mount-then-open failed: {e.message}")
+            GLib.idle_add(self._repopulate_visible)
+            return
+        mount = volume.get_mount()
+        if not mount:
+            GLib.idle_add(self._repopulate_visible)
+            return
+        uri = mount.get_root().get_uri()
+        GLib.idle_add(self._repopulate_visible)
+        if mode == "tab":
+            GLib.idle_add(self._do_open_tab, uri, win)
+        elif mode == "window":
+            GLib.idle_add(self._do_open_window, uri)
+        else:
+            GLib.idle_add(self._do_open, uri, win)
+
     def _do_unmount(self, m: MountInfo) -> None:
         if not m or not m.gio_mount:
             return
@@ -2086,6 +2288,28 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
     def _do_properties(self, nav_uri: str, win: Gtk.Window) -> None:
         uri = nav_uri
 
+        # The native properties window is created in-process by Nautilus via the
+        # D-Bus ShowItemProperties call. It is NOT registered with the
+        # GtkApplication, so "window-added" never fires — we must poll
+        # list_toplevels() to find it. Once found, set it transient-for our
+        # window and modal so the compositor visually binds it to the parent
+        # (centered, above, moves/closes with it) instead of floating free.
+        before_ids = {id(w) for w in Gtk.Window.list_toplevels()}
+        state = {"done": False}
+
+        def _try_parent(attempt=0):
+            if state["done"]:
+                return GLib.SOURCE_REMOVE
+            for w in Gtk.Window.list_toplevels():
+                if id(w) not in before_ids and w is not win:
+                    w.set_transient_for(win)
+                    w.set_modal(True)
+                    state["done"] = True
+                    return GLib.SOURCE_REMOVE
+            if attempt < 40:
+                GLib.timeout_add(25, lambda: _try_parent(attempt + 1))
+            return GLib.SOURCE_REMOVE
+
         def _on_call(bus, result, _):
             try:
                 bus.call_finish(result)
@@ -2111,6 +2335,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             except Exception:
                 pass
 
+        # Start polling immediately so we catch the window as early as possible.
+        _try_parent()
         Gio.bus_get(Gio.BusType.SESSION, None, _on_bus)
 
     def _launch_prefs(self, win: Gtk.Window | None = None) -> None:
@@ -2133,6 +2359,14 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         start_row.set_subtitle(_("Show the disk panel when Nautilus opens"))
         self._gsettings.bind("start-on-disks", start_row, "active", Gio.SettingsBindFlags.DEFAULT)
         gen_group.add(start_row)
+
+        hide_sys_row = Adw.SwitchRow()
+        hide_sys_row.set_title(_("Hide system partitions"))
+        hide_sys_row.set_subtitle(_("Hide boot and EFI drives"))
+        self._gsettings.bind(
+            "hide-system-partitions", hide_sys_row, "active", Gio.SettingsBindFlags.DEFAULT
+        )
+        gen_group.add(hide_sys_row)
 
         color_group = Adw.PreferencesGroup()
         color_group.set_title(_("Disk Usage Color"))
@@ -2414,7 +2648,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         def _on_computer_right_clicked(gesture, _n, x, y):
             gesture.set_state(Gtk.EventSequenceState.CLAIMED)
 
-            on_computer = self._windows.get(win, {}).get("visible_child") == STACK_DISKINFO
+            on_computer = self._windows.get(win, {}).get("visible_view") == VIEW_DISKINFO
 
             menu = Gio.Menu()
             ag = Gio.SimpleActionGroup()
@@ -2516,99 +2750,25 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         _log("_inject_sidebar_link: outer scroll wrapper set as content ✓")
         return True
 
-    def _attach_pathbar(self, win: Gtk.Window) -> bool:
-        """Locate the path bar and cache it. If found, installs watchers to
-        automatically fix chips as they appear."""
-        state = self._windows.get(win)
-        if not state:
-            return False
+    def _fix_pathbar_icon(self, win: Gtk.Window) -> bool:
+        """Non-invasive chip icon update. Called on each title-change arrival at
+        computer:///. Scans the window for the chip label, finds the existing
+        Gtk.Image in the chip, and pins it to computer-symbolic.
 
-        found_widget = _find_widget(
-            win,
-            buildable_id="path_bar",
-            class_name="NautilusPathBar",
-            css_class="nautilus-pathbar",
-            site="_attach_pathbar",
-        )
-
-        if found_widget is not None:
-            state["pathbar"] = found_widget
-
-            # Watch everything!
-            for w in _all_widgets(found_widget):
-                if isinstance(w, Gtk.Stack):
-                    w.connect(
-                        "notify::visible-child",
-                        lambda *_: GLib.idle_add(
-                            lambda: self._fix_pathbar_icon(found_widget) or False
-                        ),
-                    )
-                elif isinstance(w, Gtk.Box):
-                    self._watch_box_children(w, found_widget)
-
-            self._fix_pathbar_icon(found_widget)
-            self._subscribe_pathbar_labels(found_widget)
-            return True
-        return False
-
-    def _watch_box_children(self, box, pathbar) -> None:
-        """Observe children changes in a Gtk.Box to catch new chips."""
-        if not isinstance(box, Gtk.Box) or getattr(box, "_diskinfo_watched", False):
-            return
-        box._diskinfo_watched = True
-        model = box.observe_children()
-        box._diskinfo_observer = model  # keep the listmodel alive (prevent GC)
-
-        def _on_items_changed(*_):
-            child = box.get_first_child()
-            while child:
-                if isinstance(child, Gtk.Box):
-                    self._watch_box_children(child, pathbar)
-                child = child.get_next_sibling()
-            self._subscribe_pathbar_labels(pathbar)
-            GLib.idle_add(lambda: self._fix_pathbar_icon(pathbar) or False)
-
-        model.connect("items-changed", _on_items_changed)
-
-        child = box.get_first_child()
-        while child:
-            if isinstance(child, Gtk.Box):
-                self._watch_box_children(child, pathbar)
-            child = child.get_next_sibling()
-
-    def _subscribe_pathbar_labels(self, pathbar) -> None:
-        """Connect notify::label on every GtkLabel inside *pathbar*."""
+        Never connects signals to Nautilus's internal pathbar GtkStack or box
+        models, and never calls set_child() — those caused the GTK_IS_STACK crash
+        (issue #11). The notify::title trigger already fires on every navigation,
+        so no persistent watcher is needed."""
         target_labels = {COMPUTER_LABEL, _LOCATION_TITLE}
-        for w in _all_widgets(pathbar):
-            if isinstance(w, Gtk.Label) and not getattr(w, "_diskinfo_label_watched", False):
-                w._diskinfo_label_watched = True
-                w.connect(
-                    "notify::label",
-                    lambda lbl, _pspec, pb=pathbar: (
-                        self._fix_pathbar_icon(pb)
-                        if lbl.get_label() and lbl.get_label().strip() in target_labels
-                        else None
-                    ),
-                )
 
-    def _fix_pathbar_icon(self, pathbar_or_win) -> bool:
-        """Search within the given root widget for any GtkLabel showing
-        COMPUTER_LABEL or _LOCATION_TITLE inside a path-bar-like structure.
-        Ensures a computer-symbolic icon is present and pinned."""
-        if pathbar_or_win is None:
-            return False
-
-        target_labels = {COMPUTER_LABEL, _LOCATION_TITLE}
-        for w in _all_widgets(pathbar_or_win):
+        for w in _all_widgets(win):
             if not isinstance(w, Gtk.Label):
                 continue
-
             label_text = w.get_label()
             if not label_text or label_text.strip() not in target_labels:
                 continue
 
-            # Skip labels inside any sidebar-like widget
-            # (unless we're explicitly fixing the sidebar)
+            # Skip labels inside the sidebar
             ancestor = w.get_parent()
             in_sidebar = False
             while ancestor:
@@ -2616,15 +2776,13 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                 if "Sidebar" in cls or "PlacesView" in cls:
                     in_sidebar = True
                     break
-                # Breadcrumb button detection
                 if cls in ("NautilusPathBarButton", "GtkButton", "AdwButton"):
                     break
                 ancestor = ancestor.get_parent()
-
-            if in_sidebar and "PathBar" not in type(pathbar_or_win).__name__:
+            if in_sidebar:
                 continue
 
-            # Find the containing button/chip container
+            # Walk up to the chip container
             container = w.get_parent()
             while container and type(container).__name__ not in (
                 "NautilusPathBarButton",
@@ -2638,43 +2796,11 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             if not container:
                 continue
 
-            # Look for ANY image inside this container
-            image = None
+            # Pin the existing chip image — no structural changes to Nautilus's tree
             for sub in _all_widgets(container):
                 if isinstance(sub, Gtk.Image):
-                    image = sub
+                    _pin_icon(sub, COMPUTER_ICON)
                     break
-
-            if image:
-                _pin_icon(image, COMPUTER_ICON)
-                image.set_visible(True)
-            else:
-                # No image found at all in the button/chip structure.
-                parent = w.get_parent()
-                if isinstance(parent, Gtk.Box):
-                    image = Gtk.Image.new_from_icon_name(COMPUTER_ICON)
-                    image.set_valign(Gtk.Align.CENTER)
-                    parent.prepend(image)
-                    _pin_icon(image, COMPUTER_ICON)
-                elif type(parent).__name__ in (
-                    "GtkButton",
-                    "NautilusPathBarButton",
-                    "GtkToggleButton",
-                    "Button",
-                    "ToggleButton",
-                ) or hasattr(parent, "set_child"):
-                    # Use native default spacing
-                    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-                    box.set_spacing(0)
-                    image = Gtk.Image.new_from_icon_name(COMPUTER_ICON)
-                    image.set_valign(Gtk.Align.CENTER)
-                    _pin_icon(image, COMPUTER_ICON)
-
-                    w._diskinfo_wrapped = True
-                    parent.set_child(None)
-                    box.append(image)
-                    box.append(w)
-                    parent.set_child(box)
 
         return False
 

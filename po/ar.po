@@ -131,3 +131,9 @@ msgstr "افتح في نافذة جديدة"
 
 msgid "Properties"
 msgstr "الخصائص"
+
+msgid "Hide system partitions"
+msgstr "إخفاء أقسام النظام"
+
+msgid "Hide boot and EFI drives"
+msgstr "إخفاء أقسام الإقلاع و EFI"

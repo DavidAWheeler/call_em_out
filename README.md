@@ -16,34 +16,17 @@
 
 ## Installation
 
-### Quick install (recommended)
-
+### Install
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/yannmasoch/nautilus-my-computer/main/install.sh)"
-```
-### Install specific version from another branch
-```bash
-VERSION=[branch_name] bash -c "$(curl -fsSL https://raw.githubusercontent.com/yannmasoch/nautilus-my-computer/main/install.sh)"
+curl -fsSL https://raw.githubusercontent.com/yannmasoch/nautilus-my-computer/main/install.sh | sh
 ```
 
-### Manual install from a local clone
-
+### Uninstall
 ```bash
-git clone https://github.com/yannmasoch/nautilus-my-computer.git
-cd nautilus-my-computer
-bash install.sh
+curl -fsSL https://raw.githubusercontent.com/yannmasoch/nautilus-my-computer/main/install.sh | sh -s -- --uninstall
 ```
-
-### What the installer does
-
-1. Installs the Python bindings if needed (`python-nautilus` on Arch, `python3-nautilus` on Debian/Ubuntu/openSUSE, `nautilus-python` on Fedora)
-2. Copies `nautilus-my-computer.py` → `~/.local/share/nautilus-python/extensions/`
-3. Copies the GSettings schema → `~/.local/share/glib-2.0/schemas/` and recompiles
-4. Asks whether to restart Nautilus (nautilus -q && nautilus), recommended to activate the extension immediately
 
 Nothing is written outside your home directory.
-
-> To uninstall, re-run the installer and choose **Uninstall**. It removes the extension, the schema, and resets all preferences.
 
 ## My Computer
 

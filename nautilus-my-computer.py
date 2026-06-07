@@ -1006,11 +1006,13 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             if win in self._windows:
                 return GLib.SOURCE_REMOVE
             attempts[0] += 1
-            # Hold off until the widget tree exists AND the first load has
-            # settled (title resolved to a real location, not "Loading…").
-            # Also enforce a minimum delay of at least 25 attempts (500ms) to ensure
-            # Nautilus has finished loading the window layout, popovers, and menus.
-            if _is_unsettled_title(win.get_title() or "") or attempts[0] < 25:
+            # Hold off until the first load has settled (title resolved to a
+            # real location, not "Loading…"). Measured: title-settle is the
+            # latest of the real readiness signals (tree/mapped/title), lagging
+            # by ~20-40ms — typically settling within ~20-65ms of window-added.
+            # No fixed floor: PRIORITY_LOW on the injection idle (below) is what
+            # actually avoids the issue #4 templates-menu race, not extra delay.
+            if _is_unsettled_title(win.get_title() or ""):
                 if attempts[0] > _WIN_INIT_MAX_ATTEMPTS:
                     # Window never settled (rare) — inject anyway so the
                     # extension still works; route through the low-prio idle.

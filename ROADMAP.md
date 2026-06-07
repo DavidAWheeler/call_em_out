@@ -4,8 +4,7 @@ This roadmap reflects planned fixes, features, and improvements. It is subject t
 
 ---
 
-
-## v0.2.0 - Internationalization i18n
+## v0.2.0 - Internationalization
 - feat: i18n architecture with gettext support
 - feat: Arabic translations (credit @e6ad2020)
 - feat: French translations
@@ -37,6 +36,10 @@ This roadmap reflects planned fixes, features, and improvements. It is subject t
 - fix: navigation crash caused by persistent pathbar signal connections (issue #11, credit @unaibenidorm, @e6ad2020)
 - refactor: replace `Gtk.Stack` with `Gtk.Overlay` for panel injection
 - chore: non-interactive installer with curl | sh interface and VERSION/BRANCH env vars (credit @sour-source)
+
+## v0.4.1 - Internationalization
+- i18n: update Arabic translations for new strings (credit @e6ad2020)
+- i18n: update French translations for new strings
 
 ## v0.5.0 - Disk group system *(in progress)*
 - feat: configurable System disk group available in Settings

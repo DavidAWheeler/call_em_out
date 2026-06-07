@@ -137,3 +137,9 @@ msgstr "Masquer les partitions système"
 
 msgid "Hide boot and EFI drives"
 msgstr "Masquer les partitions de démarrage (Boot et EFI)"
+
+msgid "Open My Computer"
+msgstr "Ouvrir My Computer"
+
+msgid "On this computer"
+msgstr "Sur cet ordinateur"

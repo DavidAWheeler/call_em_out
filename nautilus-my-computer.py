@@ -65,7 +65,7 @@ DEBUG_SELFTEST = _flag("MC_SELFTEST", default=False)  # in-process navigation se
 
 # ── Extension metadata (keep in sync with pyproject.toml) ────────────────────
 EXT_NAME = "My Computer for Nautilus"
-EXT_VERSION = "0.4.0"
+EXT_VERSION = "0.4.1"
 EXT_AUTHOR = "Yann Masoch"
 EXT_LICENSE = "MIT"
 EXT_GITHUB = "https://github.com/yannmasoch/nautilus-my-computer"

@@ -41,6 +41,9 @@ This roadmap reflects planned fixes, features, and improvements. It is subject t
 - i18n: update Arabic translations for new strings (credit @e6ad2020)
 - i18n: update French translations for new strings
 
+## v0.4.2 - Performance
+- ux: remove artificial 500ms delay before panel injection — gate purely on title-settle instead of a fixed attempt floor, dropping perceived open time from ~500-600ms to ~20-65ms with no regression to the issue #4 crash protection
+
 ## v0.5.0 - Disk group system *(in progress)*
 - feat: configurable System disk group available in Settings
 - refactor: disk group class objects

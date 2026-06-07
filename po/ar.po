@@ -137,3 +137,9 @@ msgstr "إخفاء أقسام النظام"
 
 msgid "Hide boot and EFI drives"
 msgstr "إخفاء أقسام الإقلاع و EFI"
+
+msgid "Open My Computer"
+msgstr "افتح جهاز الكمبيوتر"
+
+msgid "On this computer"
+msgstr "على هذا الكمبيوتر"

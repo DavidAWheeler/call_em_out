@@ -7,10 +7,10 @@
 #   curl -fsSL https://raw.githubusercontent.com/yannmasoch/nautilus-my-computer/main/install.sh | sh
 #
 # Specific version:
-#   VERSION=v0.1.1 curl -fsSL https://.../install.sh | sh
+#   curl -fsSL https://.../install.sh | sh -s -- --version=v0.1.1
 #
 # Dev branch:
-#   BRANCH=dev curl -fsSL https://.../install.sh | sh
+#   curl -fsSL https://.../install.sh | sh -s -- --branch=dev
 #
 # Uninstall:
 #   curl -fsSL https://.../install.sh | sh -s -- --uninstall
@@ -38,20 +38,27 @@ trap cleanup EXIT
 REPO="yannmasoch/nautilus-my-computer"
 EXT_DIR="$HOME/.local/share/nautilus-python/extensions"
 EXT_FILE="nautilus-my-computer.py"
-SCHEMA_FILE="io.github.yannmasoch.nautilus-my-computer.gschema.xml"
+SCHEMA_ID="io.github.yannmasoch.nautilus-my-computer"
+SCHEMA_FILE="$SCHEMA_ID.gschema.xml"
 USER_SCHEMA_DIR="$HOME/.local/share/glib-2.0/schemas"
+GETTEXT_DOMAIN="${EXT_FILE%.py}"
+PYCACHE_GLOB="${EXT_FILE%.py}.cpython-"
+SUDO=""
+[ "$(id -u)" -ne 0 ] && SUDO="sudo"
 
 # --- Argument parsing ---
 MODE="install"
+VERSION="${VERSION:-}"
+BRANCH="${BRANCH:-}"
 for arg in "$@"; do
     case "$arg" in
         --uninstall) MODE="uninstall" ;;
+        --version=*) VERSION="${arg#--version=}" ;;
+        --branch=*) BRANCH="${arg#--branch=}" ;;
         *) die "Unknown argument: $arg" ;;
     esac
 done
-
-VERSION="${VERSION:-}"
-BRANCH="${BRANCH:-}"
+[ -n "$VERSION" ] && [ -n "$BRANCH" ] && die "--version and --branch are mutually exclusive"
 
 # --- Source detection: local clone or remote -----------------------------------
 # Only treat this as a local-clone run when the script was invoked as a real file
@@ -91,7 +98,7 @@ detect_pm() {
 nautilus_python_installed() {
     case "$PM" in
         pacman) pacman -Q "$NP_PKG" >/dev/null 2>&1 ;;
-        apt)    dpkg -l "$NP_PKG"   >/dev/null 2>&1 ;;
+        apt)    dpkg-query -W -f='${Status}' "$NP_PKG" 2>/dev/null | grep -q 'install ok installed' ;;
         dnf)    rpm -q  "$NP_PKG"   >/dev/null 2>&1 ;;
         zypper) rpm -q  "$NP_PKG"   >/dev/null 2>&1 ;;
     esac
@@ -103,10 +110,10 @@ ensure_nautilus_python() {
     fi
     line "$NP_PKG" "not found, installing..."
     case "$PM" in
-        pacman) sudo pacman -S --noconfirm "$NP_PKG" ;;
-        apt)    sudo apt-get install -y "$NP_PKG" python3-gi ;;
-        dnf)    sudo dnf install -y "$NP_PKG" ;;
-        zypper) sudo zypper install -y "$NP_PKG" ;;
+        pacman) $SUDO pacman -S --noconfirm "$NP_PKG" ;;
+        apt)    $SUDO apt-get install -y "$NP_PKG" python3-gi ;;
+        dnf)    $SUDO dnf install -y "$NP_PKG" ;;
+        zypper) $SUDO zypper install -y "$NP_PKG" ;;
     esac
     nautilus_python_installed || die "$NP_PKG installation failed."
     line "$NP_PKG" "installed"
@@ -118,10 +125,10 @@ ensure_gettext() {
     fi
     line "gettext" "not found, installing..."
     case "$PM" in
-        pacman) sudo pacman -S --noconfirm gettext ;;
-        apt)    sudo apt-get install -y gettext ;;
-        dnf)    sudo dnf install -y gettext ;;
-        zypper) sudo zypper install -y gettext-tools ;;
+        pacman) $SUDO pacman -S --noconfirm gettext ;;
+        apt)    $SUDO apt-get install -y gettext ;;
+        dnf)    $SUDO dnf install -y gettext ;;
+        zypper) $SUDO zypper install -y gettext-tools ;;
     esac
     if command -v msgfmt >/dev/null 2>&1; then
         line "gettext" "installed"
@@ -132,7 +139,7 @@ ensure_gettext() {
 
 # --- Dependency check ---
 check_dependencies() {
-    local missing="" tools="python3 glib-compile-schemas gsettings"
+    missing="" tools="python3 glib-compile-schemas gsettings"
     [ "$INSTALL_SOURCE" = "remote" ] && tools="curl $tools"
     for tool in $tools; do
         command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
@@ -143,24 +150,31 @@ check_dependencies() {
 # --- Resolve ref ---
 LATEST=""
 
+probe_ref() {
+    curl -s -o /dev/null -w "%{http_code}" \
+        "https://raw.githubusercontent.com/$REPO/$1/$EXT_FILE"
+}
+
 resolve_ref() {
     if [ -n "$BRANCH" ]; then
+        status=$(probe_ref "$BRANCH")
+        [ "$status" = "200" ] || die "Branch '$BRANCH' not found or inaccessible (HTTP $status)."
         LATEST="$BRANCH"
         line "Source" "branch $BRANCH"
         return
     fi
 
-    local response latest_release
     response=$(curl -s "https://api.github.com/repos/$REPO/releases/latest") \
         || die "Failed to reach GitHub API."
     latest_release=$(echo "$response" | grep '"tag_name"' \
         | sed 's/.*"tag_name": *"\(.*\)".*/\1/' || true)
-    [ -z "$latest_release" ] && latest_release="main"
+    if [ -z "$latest_release" ]; then
+        error "Could not resolve latest release from GitHub API, falling back to main branch."
+        latest_release="main"
+    fi
 
     if [ -n "$VERSION" ]; then
-        local status
-        status=$(curl -s -o /dev/null -w "%{http_code}" \
-            "https://raw.githubusercontent.com/$REPO/$VERSION/$EXT_FILE")
+        status=$(probe_ref "$VERSION")
         if [ "$status" = "200" ]; then
             LATEST="$VERSION"
             line "Version" "$VERSION"
@@ -177,12 +191,11 @@ resolve_ref() {
 # --- Fetch or copy source files ---
 download_files() {
     if [ "$INSTALL_SOURCE" = "remote" ]; then
-        local base="https://raw.githubusercontent.com/$REPO/$LATEST"
+        base="https://raw.githubusercontent.com/$REPO/$LATEST"
         curl -fsSL "$base/$EXT_FILE"    -o "$TEMP_DIR/$EXT_FILE"    || die "Failed to download $EXT_FILE"
         curl -fsSL "$base/$SCHEMA_FILE" -o "$TEMP_DIR/$SCHEMA_FILE" || die "Failed to download $SCHEMA_FILE"
 
         mkdir -p "$TEMP_DIR/po"
-        local langs
         langs=$(curl -fsSL "https://api.github.com/repos/$REPO/contents/po?ref=$LATEST" \
             | sed -n 's/.*"name": "\(.*\)\.po".*/\1/p') || true
         for lang in $langs; do
@@ -202,7 +215,7 @@ download_files() {
 install_files() {
     mkdir -p "$EXT_DIR"
     cp "$TEMP_DIR/$EXT_FILE" "$EXT_DIR/$EXT_FILE"
-    rm -f "$EXT_DIR/__pycache__/nautilus-my-computer.cpython-"*.pyc 2>/dev/null || true
+    rm -f "$EXT_DIR/__pycache__/$PYCACHE_GLOB"*.pyc 2>/dev/null || true
     line "Extension" "$EXT_DIR/$EXT_FILE"
 
     mkdir -p "$USER_SCHEMA_DIR"
@@ -212,14 +225,13 @@ install_files() {
 
     [ -d "$TEMP_DIR/po" ] || return
     command -v msgfmt >/dev/null 2>&1 || return
-    local lang_list=""
+    lang_list=""
     for po_file in "$TEMP_DIR"/po/*.po; do
         [ -f "$po_file" ] || continue
-        local lang loc_dir
         lang=$(basename "$po_file" .po)
         loc_dir="$HOME/.local/share/locale/$lang/LC_MESSAGES"
         mkdir -p "$loc_dir"
-        msgfmt "$po_file" -o "$loc_dir/nautilus-my-computer.mo"
+        msgfmt "$po_file" -o "$loc_dir/$GETTEXT_DOMAIN.mo"
         lang_list="$lang_list $lang"
     done
     [ -n "$lang_list" ] && line "Languages" "$(format_lang_list "$lang_list")"
@@ -227,7 +239,7 @@ install_files() {
 
 # --- Format language list: EN (default) first, then alpha-sorted uppercase ---
 format_lang_list() {
-    local langs="$1" result="EN (default)" rest=""
+    langs="$1" result="EN (default)" rest=""
     rest=$(echo "$langs" | tr ' ' '\n' | grep -v "^en$" | sort | tr '[:lower:]' '[:upper:]' | tr '\n' ' ')
     for lang in $rest; do
         result="$result, $lang"
@@ -255,13 +267,13 @@ do_install() {
     if [ "$INSTALL_SOURCE" = "remote" ]; then
         resolve_ref
     else
-        local local_version
         local_version=$(sed -n 's/^EXT_VERSION = "\(.*\)"/\1/p' "$INSTALL_SOURCE/$EXT_FILE")
         if [ -n "$local_version" ]; then
             line "Source" "local (v$local_version)"
         else
             line "Source" "local"
         fi
+        [ -n "$VERSION$BRANCH" ] && error "--version/--branch ignored for local installs"
     fi
 
     if [ -f "$EXT_DIR/$EXT_FILE" ]; then
@@ -289,28 +301,27 @@ do_install() {
 do_uninstall() {
     echo ""
     printf '%s\n' "${BOLD}Uninstall${RESET}"
-    local found=false
+    found=false
 
     if [ -f "$EXT_DIR/$EXT_FILE" ]; then
         rm -f "$EXT_DIR/$EXT_FILE"
-        rm -f "$EXT_DIR/__pycache__/nautilus-my-computer.cpython-"*.pyc 2>/dev/null || true
+        rm -f "$EXT_DIR/__pycache__/$PYCACHE_GLOB"*.pyc 2>/dev/null || true
         line "Extension" "$EXT_DIR/$EXT_FILE"
         found=true
     fi
 
     if [ -f "$USER_SCHEMA_DIR/$SCHEMA_FILE" ]; then
-        gsettings reset-recursively io.github.yannmasoch.nautilus-my-computer 2>/dev/null || true
+        gsettings reset-recursively "$SCHEMA_ID" 2>/dev/null || true
         rm -f "$USER_SCHEMA_DIR/$SCHEMA_FILE"
         glib-compile-schemas "$USER_SCHEMA_DIR"
         line "Preferences" "$USER_SCHEMA_DIR/$SCHEMA_FILE"
         found=true
     fi
 
-    local loc_prefix="$HOME/.local/share/locale"
-    local lang_list=""
-    for mo_file in "$loc_prefix"/*/LC_MESSAGES/nautilus-my-computer.mo; do
+    loc_prefix="$HOME/.local/share/locale"
+    lang_list=""
+    for mo_file in "$loc_prefix"/*/LC_MESSAGES/"$GETTEXT_DOMAIN".mo; do
         [ -f "$mo_file" ] || continue
-        local lang
         lang=$(echo "$mo_file" | sed "s|$loc_prefix/\(.*\)/LC_MESSAGES.*|\1|")
         rm -f "$mo_file"
         lang_list="$lang_list $lang"

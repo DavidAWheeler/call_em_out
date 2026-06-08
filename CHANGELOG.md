@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 
 ---
 
+## [0.4.5]
+### Fixed
+- Installer fully POSIX compliant - removed all `local` keyword usage
+- Installer uses CLI flags (`--version=`, `--branch=`) instead of env vars, which do not survive `curl | sh` pipes
+- `--version` and `--branch` validated as mutually exclusive
+- `--branch` probed early, fails hard on unknown branch name
+- `apt` package detection uses `dpkg-query` to avoid false positives on partially-removed packages
+- GitHub API fallback to `main` now prints a visible warning instead of silently proceeding
+- Installer skips `sudo` when already running as root
+- `--version`/`--branch` flags produce a warning on local installs instead of silently doing nothing
+
+### Maintenance
+- Extracted `SCHEMA_ID`, `GETTEXT_DOMAIN`, `PYCACHE_GLOB` constants - all derived names have a single source of truth
+
 ## [0.4.4]
 ### Fixed
 - Installer (`install.sh`) now POSIX `sh` compliant, fixes `curl | sh` failing on systems where `/bin/sh` is `dash` (e.g. Debian, Ubuntu)

@@ -4,6 +4,10 @@ All notable changes to this project are documented here.
 
 ---
 
+## [0.4.4]
+### Fixed
+- Installer (`install.sh`) now POSIX `sh` compliant, fixes `curl | sh` failing on systems where `/bin/sh` is `dash` (e.g. Debian, Ubuntu)
+
 ## [0.4.3]
 ### UX
 - Fixed a brief flicker of the file view when navigating to Computer

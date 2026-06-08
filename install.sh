@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-# install.sh — Nautilus My Computer Extension Installer
+#!/bin/sh
+# install.sh - Nautilus My Computer Extension Installer
 #
 # Wrap everything in main() so a truncated curl | sh never executes a half-downloaded script.
 #
@@ -7,41 +7,41 @@
 #   curl -fsSL https://raw.githubusercontent.com/yannmasoch/nautilus-my-computer/main/install.sh | sh
 #
 # Specific version:
-#   VERSION=v0.1.1 curl -fsSL https://…/install.sh | sh
+#   VERSION=v0.1.1 curl -fsSL https://.../install.sh | sh
 #
 # Dev branch:
-#   BRANCH=dev curl -fsSL https://…/install.sh | sh
+#   BRANCH=dev curl -fsSL https://.../install.sh | sh
 #
 # Uninstall:
-#   curl -fsSL https://…/install.sh | sh -s -- --uninstall
+#   curl -fsSL https://.../install.sh | sh -s -- --uninstall
 
 main() {
 
-set -euo pipefail
+set -eu
 
-# ─── Colors ───────────────────────────────────────────────────────────────────
-RED=$'\033[0;31m'
-CYAN=$'\033[0;36m'
-BLUE=$'\033[0;34m'
-BOLD=$'\033[1m'
-RESET=$'\033[0m'
+# --- Colors -------------------------------------------------------------------
+RED="$(printf '\033[0;31m')"
+CYAN="$(printf '\033[0;36m')"
+BOLD="$(printf '\033[1m')"
+RESET="$(printf '\033[0m')"
 
-line()  { printf "%-20s" "$1"; echo -e "${CYAN}$2${RESET}"; }
-error() { echo -e "${RED}[ERROR]${RESET} $*" >&2; }
+line()  { printf "%-20s" "$1"; printf '%s%s%s\n' "$CYAN" "$2" "$RESET"; }
+error() { printf '%s[ERROR]%s %s\n' "$RED" "$RESET" "$*" >&2; }
 die()   { error "$*"; exit 1; }
 
-# ─── Temp dir + cleanup ───────────────────────────────────────────────────────
+# --- Temp dir + cleanup --------------------------------------------------------
 TEMP_DIR=$(mktemp -d)
-trap 'rm -rf "$TEMP_DIR"' EXIT
+cleanup() { rm -rf "$TEMP_DIR"; }
+trap cleanup EXIT
 
-# ─── Constants ────────────────────────────────────────────────────────────────
+# --- Constants ---
 REPO="yannmasoch/nautilus-my-computer"
 EXT_DIR="$HOME/.local/share/nautilus-python/extensions"
 EXT_FILE="nautilus-my-computer.py"
 SCHEMA_FILE="io.github.yannmasoch.nautilus-my-computer.gschema.xml"
 USER_SCHEMA_DIR="$HOME/.local/share/glib-2.0/schemas"
 
-# ─── Argument parsing ─────────────────────────────────────────────────────────
+# --- Argument parsing ---
 MODE="install"
 for arg in "$@"; do
     case "$arg" in
@@ -53,8 +53,19 @@ done
 VERSION="${VERSION:-}"
 BRANCH="${BRANCH:-}"
 
-# ─── Source detection: local clone or remote ──────────────────────────────────
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
+# --- Source detection: local clone or remote -----------------------------------
+# Only treat this as a local-clone run when the script was invoked as a real file
+# (e.g. ./install.sh). When piped via `curl | sh`, $0 is "sh" or "-" (no slash),
+# so the case below leaves SCRIPT_DIR empty and we fall through to remote install,
+# even if the cwd happens to contain files with matching names.
+SCRIPT_DIR=""
+case "$0" in
+    */*)
+        if [ -f "$0" ]; then
+            SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd || echo "")"
+        fi
+        ;;
+esac
 if [ -z "${INSTALL_SOURCE:-}" ]; then
     if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/$EXT_FILE" ] && [ -f "$SCRIPT_DIR/$SCHEMA_FILE" ]; then
         INSTALL_SOURCE="$SCRIPT_DIR"
@@ -63,7 +74,7 @@ if [ -z "${INSTALL_SOURCE:-}" ]; then
     fi
 fi
 
-# ─── Package manager detection ────────────────────────────────────────────────
+# --- Package manager detection ---
 PM=""
 NP_PKG=""
 
@@ -90,7 +101,7 @@ ensure_nautilus_python() {
     if nautilus_python_installed; then
         line "$NP_PKG" "detected"; return
     fi
-    line "$NP_PKG" "not found — installing..."
+    line "$NP_PKG" "not found, installing..."
     case "$PM" in
         pacman) sudo pacman -S --noconfirm "$NP_PKG" ;;
         apt)    sudo apt-get install -y "$NP_PKG" python3-gi ;;
@@ -105,7 +116,7 @@ ensure_gettext() {
     if command -v msgfmt >/dev/null 2>&1; then
         line "gettext" "detected"; return
     fi
-    line "gettext" "not found — installing..."
+    line "gettext" "not found, installing..."
     case "$PM" in
         pacman) sudo pacman -S --noconfirm gettext ;;
         apt)    sudo apt-get install -y gettext ;;
@@ -115,11 +126,11 @@ ensure_gettext() {
     if command -v msgfmt >/dev/null 2>&1; then
         line "gettext" "installed"
     else
-        line "gettext" "install failed — translations will be skipped"
+        line "gettext" "install failed, translations will be skipped"
     fi
 }
 
-# ─── Dependency check ─────────────────────────────────────────────────────────
+# --- Dependency check ---
 check_dependencies() {
     local missing="" tools="python3 glib-compile-schemas gsettings"
     [ "$INSTALL_SOURCE" = "remote" ] && tools="curl $tools"
@@ -129,7 +140,7 @@ check_dependencies() {
     [ -z "$missing" ] || die "Required tools missing:$missing"
 }
 
-# ─── Resolve ref ──────────────────────────────────────────────────────────────
+# --- Resolve ref ---
 LATEST=""
 
 resolve_ref() {
@@ -155,7 +166,7 @@ resolve_ref() {
             line "Version" "$VERSION"
         else
             LATEST="$latest_release"
-            line "Version" "$VERSION not found — using $latest_release"
+            line "Version" "$VERSION not found, using $latest_release"
         fi
     else
         LATEST="$latest_release"
@@ -163,7 +174,7 @@ resolve_ref() {
     fi
 }
 
-# ─── Fetch or copy source files ───────────────────────────────────────────────
+# --- Fetch or copy source files ---
 download_files() {
     if [ "$INSTALL_SOURCE" = "remote" ]; then
         local base="https://raw.githubusercontent.com/$REPO/$LATEST"
@@ -173,7 +184,7 @@ download_files() {
         mkdir -p "$TEMP_DIR/po"
         local langs
         langs=$(curl -fsSL "https://api.github.com/repos/$REPO/contents/po?ref=$LATEST" \
-            | grep '"name"' | sed 's/.*"name": "\(.*\)\.po".*/\1/' | grep -v '"name"') || true
+            | sed -n 's/.*"name": "\(.*\)\.po".*/\1/p') || true
         for lang in $langs; do
             curl -fsSL "$base/po/$lang.po" -o "$TEMP_DIR/po/$lang.po" || true
         done
@@ -184,10 +195,10 @@ download_files() {
     fi
 
     python3 -m py_compile "$TEMP_DIR/$EXT_FILE" \
-        || die "Extension file failed syntax check — aborting."
+        || die "Extension file failed syntax check, aborting."
 }
 
-# ─── Install extension + schema ───────────────────────────────────────────────
+# --- Install extension + schema ---
 install_files() {
     mkdir -p "$EXT_DIR"
     cp "$TEMP_DIR/$EXT_FILE" "$EXT_DIR/$EXT_FILE"
@@ -214,7 +225,7 @@ install_files() {
     [ -n "$lang_list" ] && line "Languages" "$(format_lang_list "$lang_list")"
 }
 
-# ─── Format language list: EN (default) first, then alpha-sorted uppercase ────
+# --- Format language list: EN (default) first, then alpha-sorted uppercase ---
 format_lang_list() {
     local langs="$1" result="EN (default)" rest=""
     rest=$(echo "$langs" | tr ' ' '\n' | grep -v "^en$" | sort | tr '[:lower:]' '[:upper:]' | tr '\n' ' ')
@@ -224,28 +235,33 @@ format_lang_list() {
     echo "$result"
 }
 
-# ─── Restart Nautilus ─────────────────────────────────────────────────────────
+# --- Restart Nautilus ---
 restart_nautilus() {
     nautilus -q >/dev/null 2>&1 || true
     sleep 1
     if command -v gtk-launch >/dev/null 2>&1; then
-        gtk-launch org.gnome.Nautilus >/dev/null 2>&1 &
+        nohup gtk-launch org.gnome.Nautilus >/dev/null 2>&1 &
     else
-        (exec >/dev/null 2>&1 </dev/null; exec nautilus) &
+        nohup nautilus >/dev/null 2>&1 &
     fi
-    disown $!
 }
 
-# ─── INSTALL ──────────────────────────────────────────────────────────────────
+# --- INSTALL ---
 do_install() {
     echo ""
     check_dependencies
 
-    echo -e "${BOLD}Install type${RESET}"
+    printf '%s\n' "${BOLD}Install type${RESET}"
     if [ "$INSTALL_SOURCE" = "remote" ]; then
         resolve_ref
     else
-        line "Source" "local"
+        local local_version
+        local_version=$(sed -n 's/^EXT_VERSION = "\(.*\)"/\1/p' "$INSTALL_SOURCE/$EXT_FILE")
+        if [ -n "$local_version" ]; then
+            line "Source" "local (v$local_version)"
+        else
+            line "Source" "local"
+        fi
     fi
 
     if [ -f "$EXT_DIR/$EXT_FILE" ]; then
@@ -253,26 +269,26 @@ do_install() {
     fi
 
     echo ""
-    echo -e "${BOLD}System${RESET}"
+    printf '%s\n' "${BOLD}System${RESET}"
     detect_pm
     ensure_nautilus_python
     ensure_gettext
 
     echo ""
-    echo -e "${BOLD}Install${RESET}"
+    printf '%s\n' "${BOLD}Install${RESET}"
     download_files
     install_files
 
     echo ""
-    echo -e "${BOLD}${CYAN}🚀 Installation complete!${RESET}"
+    printf '%s\n' "${BOLD}${CYAN}🚀 Installation complete!${RESET}"
     echo ""
     restart_nautilus
 }
 
-# ─── UNINSTALL ────────────────────────────────────────────────────────────────
+# --- UNINSTALL ---
 do_uninstall() {
     echo ""
-    echo -e "${BOLD}Uninstall${RESET}"
+    printf '%s\n' "${BOLD}Uninstall${RESET}"
     local found=false
 
     if [ -f "$EXT_DIR/$EXT_FILE" ]; then
@@ -303,21 +319,21 @@ do_uninstall() {
     [ -n "$lang_list" ] && line "Languages" "$(format_lang_list "$lang_list")"
 
     if [ "$found" = false ]; then
-        echo -e "${BOLD}${CYAN}Nothing to uninstall!${RESET}"
+        printf '%s\n' "${BOLD}${CYAN}Nothing to uninstall!${RESET}"
         echo ""
         return
     fi
 
     echo ""
-    echo -e "${BOLD}${CYAN}🗑️  Uninstall complete!${RESET}"
+    printf '%s\n' "${BOLD}${CYAN}🗑️  Uninstall complete!${RESET}"
     echo ""
     restart_nautilus
 }
 
-# ─── Entry point ──────────────────────────────────────────────────────────────
+# --- Entry point ---
 echo ""
-echo -e "${BOLD}Nautilus My Computer Installer${RESET}"
-printf '%0.s─' {1..30}; echo
+printf '%s\n' "${BOLD}Nautilus My Computer Installer${RESET}"
+printf '──────────────────────────────\n'
 
 case "$MODE" in
     install)   do_install ;;

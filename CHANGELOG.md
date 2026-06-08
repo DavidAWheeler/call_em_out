@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 ---
 
+## [0.4.6]
+### Fixed
+- Installer `--branch` and `--version` are now independent axes, not mutually exclusive
+- Bad branch falls back to `main`, bad version falls back to latest tag - no hard errors
+- Version resolution now uses git tags instead of GitHub Releases, so tags always resolve
+- Install type section always shows `Source`, `Branch`, and `Version` lines
+- Local installs show current branch and version from the local file, not arg values
+
 ## [0.4.5]
 ### Fixed
 - Installer fully POSIX compliant - removed all `local` keyword usage

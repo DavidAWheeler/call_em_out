@@ -58,7 +58,6 @@ for arg in "$@"; do
         *) die "Unknown argument: $arg" ;;
     esac
 done
-[ -n "$VERSION" ] && [ -n "$BRANCH" ] && die "--version and --branch are mutually exclusive"
 
 # --- Source detection: local clone or remote -----------------------------------
 # Only treat this as a local-clone run when the script was invoked as a real file
@@ -149,6 +148,8 @@ check_dependencies() {
 
 # --- Resolve ref ---
 LATEST=""
+REF_BRANCH=""
+REF_VERSION=""
 
 probe_ref() {
     curl -s -o /dev/null -w "%{http_code}" \
@@ -156,35 +157,35 @@ probe_ref() {
 }
 
 resolve_ref() {
-    if [ -n "$BRANCH" ]; then
-        status=$(probe_ref "$BRANCH")
-        [ "$status" = "200" ] || die "Branch '$BRANCH' not found or inaccessible (HTTP $status)."
-        LATEST="$BRANCH"
-        line "Source" "branch $BRANCH"
-        return
+    # Resolve the two display axes independently, then pick a single git ref.
+    #
+    #   REF_BRANCH  - branch label shown to the user (default "main")
+    #   REF_VERSION - version label shown to the user (latest tag if not pinned)
+    #   LATEST      - the one git ref actually fetched (a tag pins a commit, so a
+    #                 valid --version always wins as the download ref)
+
+    # Branch axis: keep the arg only if it resolves, else fall back to main.
+    REF_BRANCH="main"
+    if [ -n "$BRANCH" ] && [ "$(probe_ref "$BRANCH")" = "200" ]; then
+        REF_BRANCH="$BRANCH"
     fi
 
-    response=$(curl -s "https://api.github.com/repos/$REPO/releases/latest") \
+    # Version axis: latest git tag, overridden by a valid --version.
+    # /tags lists tags newest-first, so the first name is the latest version.
+    response=$(curl -s "https://api.github.com/repos/$REPO/tags") \
         || die "Failed to reach GitHub API."
-    latest_release=$(echo "$response" | grep '"tag_name"' \
-        | sed 's/.*"tag_name": *"\(.*\)".*/\1/' || true)
-    if [ -z "$latest_release" ]; then
-        error "Could not resolve latest release from GitHub API, falling back to main branch."
-        latest_release="main"
-    fi
+    latest_tag=$(echo "$response" | grep '"name"' \
+        | sed 's/.*"name": *"\(.*\)".*/\1/' | head -n 1)
 
-    if [ -n "$VERSION" ]; then
-        status=$(probe_ref "$VERSION")
-        if [ "$status" = "200" ]; then
-            LATEST="$VERSION"
-            line "Version" "$VERSION"
-        else
-            LATEST="$latest_release"
-            line "Version" "$VERSION not found, using $latest_release"
-        fi
+    pinned=""
+    [ -n "$VERSION" ] && [ "$(probe_ref "$VERSION")" = "200" ] && pinned="$VERSION"
+
+    if [ -n "$pinned" ]; then
+        REF_VERSION="$pinned"
+        LATEST="$pinned"            # a tag pins a commit, so it is the ref
     else
-        LATEST="$latest_release"
-        line "Version" "$latest_release (latest)"
+        [ -n "$latest_tag" ] && REF_VERSION="$latest_tag (latest)"
+        LATEST="$REF_BRANCH"
     fi
 }
 
@@ -266,19 +267,17 @@ do_install() {
     printf '%s\n' "${BOLD}Install type${RESET}"
     if [ "$INSTALL_SOURCE" = "remote" ]; then
         resolve_ref
+        line "Source" "GitHub"
+        line "Branch" "$REF_BRANCH"
+        [ -n "$REF_VERSION" ] && line "Version" "$REF_VERSION"
     else
-        local_version=$(sed -n 's/^EXT_VERSION = "\(.*\)"/\1/p' "$INSTALL_SOURCE/$EXT_FILE")
-        if [ -n "$local_version" ]; then
-            line "Source" "local (v$local_version)"
-        else
-            line "Source" "local"
-        fi
-        [ -n "$VERSION$BRANCH" ] && error "--version/--branch ignored for local installs"
+        REF_BRANCH=$(git -C "$INSTALL_SOURCE" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+        REF_VERSION=$(sed -n 's/^EXT_VERSION = "\(.*\)"/\1/p' "$INSTALL_SOURCE/$EXT_FILE")
+        line "Source" "local"
+        line "Branch" "$REF_BRANCH"
+        line "Version" "v${REF_VERSION:-?} (latest)"
     fi
 
-    if [ -f "$EXT_DIR/$EXT_FILE" ]; then
-        line "Previous install" "found (updating)"
-    fi
 
     echo ""
     printf '%s\n' "${BOLD}System${RESET}"

@@ -65,7 +65,7 @@ DEBUG_SELFTEST = _flag("MC_SELFTEST", default=False)  # in-process navigation se
 
 # ── Extension metadata (keep in sync with pyproject.toml) ────────────────────
 EXT_NAME = "My Computer for Nautilus"
-EXT_VERSION = "0.4.1"
+EXT_VERSION = "0.4.4"
 EXT_AUTHOR = "Yann Masoch"
 EXT_LICENSE = "MIT"
 EXT_GITHUB = "https://github.com/yannmasoch/nautilus-my-computer"
@@ -357,6 +357,12 @@ _CSS = b"""
 }
 .unmounted {
     opacity: 0.5;
+}
+.vanilla-diskinfo-view-hidden {
+    background: @view_bg_color;
+}
+.vanilla-diskinfo-view-hidden > * {
+    opacity: 0;
 }
 .gap-debug {
     margin: 0;
@@ -1006,11 +1012,13 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             if win in self._windows:
                 return GLib.SOURCE_REMOVE
             attempts[0] += 1
-            # Hold off until the widget tree exists AND the first load has
-            # settled (title resolved to a real location, not "Loading…").
-            # Also enforce a minimum delay of at least 25 attempts (500ms) to ensure
-            # Nautilus has finished loading the window layout, popovers, and menus.
-            if _is_unsettled_title(win.get_title() or "") or attempts[0] < 25:
+            # Hold off until the first load has settled (title resolved to a
+            # real location, not "Loading…"). Measured: title-settle is the
+            # latest of the real readiness signals (tree/mapped/title), lagging
+            # by ~20-40ms — typically settling within ~20-65ms of window-added.
+            # No fixed floor: PRIORITY_LOW on the injection idle (below) is what
+            # actually avoids the issue #4 templates-menu race, not extra delay.
+            if _is_unsettled_title(win.get_title() or ""):
                 if attempts[0] > _WIN_INIT_MAX_ATTEMPTS:
                     # Window never settled (rare) — inject anyway so the
                     # extension still works; route through the low-prio idle.
@@ -1161,7 +1169,29 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         panel.set_visible(name == VIEW_DISKINFO)
 
         state["visible_view"] = name
+        # Whichever view we land on is now correct to show: either the panel
+        # covers the vanilla computer:/// view, or we genuinely landed on a
+        # normal folder that must never be blanked.
+        self._blank_vanilla_view(state, False)
         return True
+
+    def _blank_vanilla_view(self, state: dict, hidden: bool) -> None:
+        """Toggle a CSS class that paints over the vanilla computer:/// file view
+        with the panel's background before our overlay panel becomes visible.
+
+        Adding/removing a style class is a same-frame paint change, not a tree
+        mutation - it cannot trigger the GTK_IS_STACK reparenting crash class
+        (see _set_visible_view). We arm this the moment we know navigation is
+        heading to computer:/// (earlier than the title-settle signal that drives
+        the overlay toggle), so the vanilla grid is never painted at all on the
+        paths we initiate ourselves."""
+        files_widget = state.get("files_widget")
+        if files_widget is None:
+            return
+        if hidden:
+            files_widget.add_css_class("vanilla-diskinfo-view-hidden")
+        else:
+            files_widget.remove_css_class("vanilla-diskinfo-view-hidden")
 
     def _on_settings_changed(self, settings: Gio.Settings, key: str) -> None:
         if key == "start-on-disks":
@@ -2485,6 +2515,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         state = self._windows.get(win)
         if state is not None:
             state["awaiting_disks"] = True
+            self._blank_vanilla_view(state, True)
 
         attempts = [0]
 
@@ -2498,6 +2529,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             attempts[0] += 1
             if attempts[0] > 25:  # ~1.5 s budget, then give up
                 st["awaiting_disks"] = False
+                self._blank_vanilla_view(st, False)
                 return GLib.SOURCE_REMOVE
             self._navigate_to(DISKS_URI, win)
             return GLib.SOURCE_CONTINUE
@@ -2505,15 +2537,23 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         GLib.timeout_add(_NAV_RETRY_MS, _try)
 
     def _navigate_to(self, uri: str, win: Gtk.Window) -> bool:
+        state = self._windows.get(win) if uri == DISKS_URI else None
+
+        def _arm_blank() -> None:
+            if state is not None:
+                self._blank_vanilla_view(state, True)
+
         for w in _all_widgets(win):
             if "Slot" in type(w).__name__:
                 try:
                     if w.activate_action("open-location", GLib.Variant("s", uri)):
+                        _arm_blank()
                         return False
                 except Exception:
                     pass
         try:
             if win.activate_action("slot.open-location", GLib.Variant("s", uri)):
+                _arm_blank()
                 return False
         except Exception:
             pass

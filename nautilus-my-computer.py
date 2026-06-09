@@ -292,7 +292,7 @@ def _is_system_mount(m: MountInfo) -> bool:
 def _classify_mount(m: MountInfo) -> str:
     """Return 'system', 'local', 'removable', 'disc', or 'network' for a mount entry."""
     # Unmounted volumes are never part of the running system.
-    # Removable (USB, optical) -> "Removable Devices"; others -> "On this computer"
+    # Removable (USB, optical) -> "Removable"; others -> "On this Computer"
     if not m.is_mounted:
         return "removable" if m.is_removable else "local"
 
@@ -1829,7 +1829,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         # Merge pass: fold items from merged groups into "local", preserving origin key
         # Each entry in local_extra is (MountInfo, origin_group_key)
         local_extra: list[tuple] = []
-        # Fixed group-level order for sort-by-type within the merged "On this computer" group:
+        # Fixed group-level order for sort-by-type within the merged "On this Computer" group:
         # system=0, local=1, removable=2, disc=3, network=4
         _merge_type_order = {"system": 0, "local": 1, "removable": 2, "disc": 3, "network": 4}
         for gkey, _gl, _gs in _GROUP_SPEC:
@@ -2596,22 +2596,22 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         page.add(gen_group)
 
         start_row = Adw.SwitchRow()
-        start_row.set_title(_("Start on Computer view"))
-        start_row.set_subtitle(_("Show the disk panel when Nautilus opens"))
+        start_row.set_title(_("Start on the Computer view"))
+        start_row.set_subtitle(_("Open Nautilus directly to the Computer view instead of Home"))
         self._gsettings.bind("start-on-disks", start_row, "active", Gio.SettingsBindFlags.DEFAULT)
         gen_group.add(start_row)
 
         vis_group = Adw.PreferencesGroup()
         vis_group.set_title(_("Visibility"))
-        page.add(vis_group)
-
-        show_sys_parts_row = Adw.SwitchRow()
-        show_sys_parts_row.set_title(_("Show system partitions"))
-        show_sys_parts_row.set_subtitle(_("Show boot and EFI partitions in the System group"))
-        self._gsettings.bind(
-            "show-system-partitions", show_sys_parts_row, "active", Gio.SettingsBindFlags.DEFAULT
+        vis_group.set_description(
+            _(
+                "Choose how each group appears. "
+                "Visible: shows the group as a normal separated section. "
+                "Merged: folds the group into the On this Computer group. "
+                "Hidden: hides the group entirely."
+            )
         )
-        vis_group.add(show_sys_parts_row)
+        page.add(vis_group)
 
         _vis_map = ["visible", "merged", "hidden"]
         _vis_labels = [_("Visible"), _("Merged"), _("Hidden")]
@@ -2634,8 +2634,17 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             combo.connect("notify::selected", _on_vis_changed)
             vis_group.add(combo)
 
+        show_sys_parts_row = Adw.SwitchRow()
+        show_sys_parts_row.set_title(_("Show system partitions"))
+        show_sys_parts_row.set_subtitle(_("Include boot and EFI partitions in the System group"))
+        self._gsettings.bind(
+            "show-system-partitions", show_sys_parts_row, "active", Gio.SettingsBindFlags.DEFAULT
+        )
+        vis_group.add(show_sys_parts_row)
+
         color_group = Adw.PreferencesGroup()
-        color_group.set_title(_("Disk Usage Color"))
+        color_group.set_title(_("Usage Bar Color"))
+        color_group.set_description(_("Select or customize the usage bar color."))
         page.add(color_group)
 
         mode_row = Adw.ComboRow()

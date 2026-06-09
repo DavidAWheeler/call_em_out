@@ -26,12 +26,6 @@
       <description>How the System group is displayed: visible, merged into On this computer, or hidden</description>
     </key>
 
-    <key name="visibility-local" enum="io.github.yannmasoch.nautilus-my-computer.visibility">
-      <default>'visible'</default>
-      <summary>On this computer group visibility</summary>
-      <description>Whether the On this computer group is shown or hidden</description>
-    </key>
-
     <key name="visibility-removable" enum="io.github.yannmasoch.nautilus-my-computer.visibility">
       <default>'visible'</default>
       <summary>Removable Devices group visibility</summary>

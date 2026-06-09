@@ -87,6 +87,13 @@ METADATA_SORT_REVERSED = "metadata::nautilus-icon-view-sort-reversed"
 DBUS_FILE_MANAGER = "org.freedesktop.FileManager1"
 DBUS_PATH_FILE_MANAGER = "/org/freedesktop/FileManager1"
 
+# Nautilus' own file-operation engine, exposed over D-Bus. Calling it gives us the
+# native transfer popup, conflict dialogs, and undo stack — the same engine the file
+# manager uses internally. CopyURIs/MoveURIs: (as sources, s destination, a{sv}).
+DBUS_NAUTILUS = "org.gnome.Nautilus"
+DBUS_NAUTILUS_FILEOPS = "org.gnome.Nautilus.FileOperations2"
+DBUS_PATH_NAUTILUS_FILEOPS = "/org/gnome/Nautilus/FileOperations2"
+
 # All updates are event-driven (VolumeMonitor signals, /proc/mounts POLLPRI,
 # GSettings changed, Gio.FileMonitor, Gtk.Application window-added). The values
 # below are one-shot retry/debounce intervals, not continuous poll periods.
@@ -341,14 +348,14 @@ _GROUP_ICON = {
     "network": "folder-remote",
 }
 
-# Ordered group spec: (key, display_label, gsettings_key, can_merge)
-# can_merge=False means this group is the merge target ("On this computer")
-_GROUP_SPEC: list[tuple[str, str, str, bool]] = [
-    ("system", "System", "visibility-system", True),
-    ("local", "On this computer", "visibility-local", False),
-    ("removable", "Removable Devices", "visibility-removable", True),
-    ("disc", "Disc Images", "visibility-disc", True),
-    ("network", "Network Volumes", "visibility-network", True),
+# Ordered group spec: (key, display_label, gsettings_key)
+# "local" is the merge target for other groups -- always visible, no gsettings key
+_GROUP_SPEC: list[tuple[str, str, str | None]] = [
+    ("system", "System", "visibility-system"),
+    ("local", "On this Computer", None),
+    ("removable", "Removable", "visibility-removable"),
+    ("disc", "Disc", "visibility-disc"),
+    ("network", "Network", "visibility-network"),
 ]
 
 
@@ -1780,11 +1787,14 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         # Build DiskGroup objects, reading visibility state from gsettings
         groups: dict[str, DiskGroup] = {}
-        for gkey, glabel, gskey, can_merge in _GROUP_SPEC:
+        for gkey, glabel, gskey in _GROUP_SPEC:
+            if gskey is None:
+                # "On this Computer" is the merge target -- always visible, never merged
+                groups[gkey] = DiskGroup(key=gkey, label=_(glabel), visible=True, merged=False)
+                continue
             vis_str = self._gsettings.get_string(gskey) if self._gsettings else "visible"
             visible = vis_str != "hidden"
-            # "On this computer" (local) is the merge target -- never merged itself
-            merged = can_merge and vis_str == "merged"
+            merged = vis_str == "merged"
             groups[gkey] = DiskGroup(key=gkey, label=_(glabel), visible=visible, merged=merged)
 
         # Classify each mount into its group
@@ -1822,7 +1832,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         # Fixed group-level order for sort-by-type within the merged "On this computer" group:
         # system=0, local=1, removable=2, disc=3, network=4
         _merge_type_order = {"system": 0, "local": 1, "removable": 2, "disc": 3, "network": 4}
-        for gkey, _gl, _gs, _cm in _GROUP_SPEC:
+        for gkey, _gl, _gs in _GROUP_SPEC:
             group = groups[gkey]
             if gkey != "local" and group.merged:
                 for m in group.items:
@@ -1832,7 +1842,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         size_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
         is_list = self._view_mode == "list-view"
 
-        for gkey, _glabel, _gskey, _can_merge in _GROUP_SPEC:
+        for gkey, _glabel, _gskey in _GROUP_SPEC:
             group = groups[gkey]
             # "local" is the merge target: render it whenever it has its own items
             # OR has received merged items, even if the group itself is set to hidden.
@@ -2004,6 +2014,12 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         key_ctrl.connect("key-pressed", self._on_row_key_pressed, win, card)
         card.add_controller(key_ctrl)
 
+        if m.is_mounted and (m.mountpoint or m.nav_uri):
+            drop = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
+            drop.connect("motion", self._on_drop_motion)
+            drop.connect("drop", self._on_files_dropped, m, win)
+            card.add_controller(drop)
+
         return card
 
     def _on_card_activated(self, _flow_box, child: Gtk.FlowBoxChild, win: Gtk.Window) -> None:
@@ -2144,6 +2160,125 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             else:
                 self._do_open(nav_uri, win)
         return True
+
+    def _on_drop_motion(self, target: Gtk.DropTarget, x: float, y: float) -> Gdk.DragAction:
+        drop = target.get_current_drop()
+        if drop is None:
+            return Gdk.DragAction(0)
+        offered = drop.get_actions()
+        if offered & Gdk.DragAction.COPY:
+            action = Gdk.DragAction.COPY
+        elif offered & Gdk.DragAction.MOVE:
+            action = Gdk.DragAction.MOVE
+        else:
+            return Gdk.DragAction(0)
+        target._last_action = action
+        return action
+
+    def _on_files_dropped(
+        self,
+        target: Gtk.DropTarget,
+        value: Gdk.FileList,
+        x: float,
+        y: float,
+        m: "MountInfo",
+        win: Gtk.Window,
+    ) -> bool:
+        if not m.is_mounted:
+            return False
+        files = list(value.get_files())
+        if not files:
+            return False
+        sources = [f.get_uri() for f in files]
+        if m.mountpoint:
+            destination = Gio.File.new_for_path(m.mountpoint).get_uri()
+        else:
+            destination = m.nav_uri
+        if not destination:
+            return False
+        use_move = getattr(target, "_last_action", Gdk.DragAction.COPY) == Gdk.DragAction.MOVE
+        method = "MoveURIs" if use_move else "CopyURIs"
+        self._nautilus_file_op(method, sources, destination, win)
+        return True
+
+    def _nautilus_file_op(
+        self, method: str, sources: list, destination: str, win: Gtk.Window
+    ) -> None:
+        """Hand a copy/move job to Nautilus' own engine via D-Bus, async.
+
+        Uses CopyURIs/MoveURIs on org.gnome.Nautilus.FileOperations2 so the transfer
+        shows the native progress popup, conflict dialogs, and undo support.
+        Passes a Wayland xdg-foreign parent-handle in platform_data so Nautilus
+        attaches the progress window to win correctly - no polling needed.
+        """
+
+        def _call(platform_data: dict) -> None:
+            def _on_call(bus, result, _):
+                try:
+                    bus.call_finish(result)
+                except Exception as e:
+                    _log(f"{method} failed: {e}")
+
+            def _on_bus(_, result):
+                try:
+                    bus = Gio.bus_get_finish(result)
+                    bus.call(
+                        DBUS_NAUTILUS,
+                        DBUS_PATH_NAUTILUS_FILEOPS,
+                        DBUS_NAUTILUS_FILEOPS,
+                        method,
+                        GLib.Variant("(assa{sv})", (sources, destination, platform_data)),
+                        None,
+                        Gio.DBusCallFlags.NONE,
+                        -1,
+                        None,
+                        _on_call,
+                        None,
+                    )
+                except Exception as e:
+                    _log(f"{method} bus error: {e}")
+
+            Gio.bus_get(Gio.BusType.SESSION, None, _on_bus)
+
+        try:
+            gi.require_version("GdkWayland", "4.0")
+            from gi.repository import GdkWayland
+
+            surface = win.get_surface()
+            if isinstance(surface, GdkWayland.WaylandToplevel):
+
+                def _got_handle(toplevel, handle, _user_data):
+                    if handle:
+                        # Keep the handle exported for the lifetime of the operation.
+                        # Nautilus creates the conflict dialog in a background thread,
+                        # long after the D-Bus method returns. If we unexported here
+                        # (on D-Bus completion), the handle would be gone before
+                        # dialog_realize_cb calls gdk_wayland_toplevel_set_transient_for_exported.
+                        # The export is freed automatically when the surface is destroyed.
+                        _call({"parent-handle": GLib.Variant("s", f"wayland:{handle}")})
+                    else:
+                        _call({})
+
+                surface.export_handle(_got_handle, None)
+                return
+        except Exception:
+            pass
+
+        # X11: the handle is the window XID as hex, prefixed "x11:". Nautilus parses
+        # it with strtol(handle, NULL, 16) in set_transient_for. No async export needed.
+        try:
+            gi.require_version("GdkX11", "4.0")
+            from gi.repository import GdkX11
+
+            surface = win.get_surface()
+            if isinstance(surface, GdkX11.X11Surface):
+                xid = surface.get_xid()
+                _call({"parent-handle": GLib.Variant("s", f"x11:{xid:x}")})
+                return
+        except Exception:
+            pass
+
+        _call({})
 
     def _on_panel_clicked(self, _gesture, _n, _x, _y, win: Gtk.Window) -> None:
         state = self._windows.get(win)
@@ -2479,27 +2614,22 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         vis_group.add(show_sys_parts_row)
 
         _vis_map = ["visible", "merged", "hidden"]
-        _vis_labels_full = [_("Visible"), _("Merged"), _("Hidden")]
-        _vis_labels_local = [_("Visible"), _("Hidden")]
+        _vis_labels = [_("Visible"), _("Merged"), _("Hidden")]
 
-        for gkey, glabel, gskey, can_merge in _GROUP_SPEC:
-            if can_merge:
-                model = Gtk.StringList.new(_vis_labels_full)
-                key_map = _vis_map
-            else:
-                model = Gtk.StringList.new(_vis_labels_local)
-                key_map = ["visible", "hidden"]
+        for gkey, glabel, gskey in _GROUP_SPEC:
+            if gskey is None:
+                continue  # "On this Computer" is always visible -- no control needed
 
             combo = Adw.ComboRow()
             combo.set_title(_(glabel))
-            combo.set_model(model)
+            combo.set_model(Gtk.StringList.new(_vis_labels))
             current = self._gsettings.get_string(gskey)
-            combo.set_selected(key_map.index(current) if current in key_map else 0)
+            combo.set_selected(_vis_map.index(current) if current in _vis_map else 0)
 
-            def _on_vis_changed(c, _param, _gskey=gskey, _key_map=key_map):
+            def _on_vis_changed(c, _param, _gskey=gskey):
                 idx = c.get_selected()
-                if 0 <= idx < len(_key_map):
-                    self._gsettings.set_string(_gskey, _key_map[idx])
+                if 0 <= idx < len(_vis_map):
+                    self._gsettings.set_string(_gskey, _vis_map[idx])
 
             combo.connect("notify::selected", _on_vis_changed)
             vis_group.add(combo)

@@ -4,17 +4,18 @@ Planned fixes, features, and improvements. Subject to change as the project evol
 
 ---
 
-## In progress - v0.5.x
+## In progress
 - ux: reduce space between group label and cards
 - ux: adjust top margin of Computer button
 - ux: adjust Computer button style to use native styles
 
 ## Next up
-- feat: level bar length adjustment
 - fix: disk cards update on connect
+- fix: update disk bar after file transfer
 - fix: compatibility with Zorin OS
 
 ## On the horizon
+- feat: drag-and-drop and copy/paste support on disk cards
 - feat: keyboard shortcut to jump to Computer view
 - feat: progress indicator during mount/unmount
 

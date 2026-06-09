@@ -14,7 +14,7 @@ gi.require_version("Gio", "2.0")
 gi.require_version("GLib", "2.0")
 gi.require_version("GObject", "2.0")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Nautilus
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Nautilus, Pango
 
 _custom_translation = None
 _localedir = os.path.expanduser("~/.local/share/locale")
@@ -407,24 +407,21 @@ _CSS = b"""
     margin: 0;
     padding: 0;
 }
+/* Zero margin/padding on both listboxes so there is no gap between our
+   injected Computer row and the native sidebar list. */
 #my_computer_list {
+    margin: 6px 0 0 0;
     padding: 0;
-    margin: 0;
 }
-#my_computer {
-    padding-left: 0;
-    padding-right: 0;
-}
-#my_computer revealer {
-    padding-left: 14px;
-    padding-right: 14px;
-}
-#places_sidebar {
-    margin-top: 0;
+/* libadwaita: `placessidebar .navigation-sidebar > row > revealer { padding: 0 14px }`.
+   Our listbox is NOT inside placessidebar so that rule never fires.
+   Our fallback row has no revealer, so replicate the inset on the row. */
+#my_computer_list > row {
+    padding: 0 14px;
 }
 .places-sidebar-list {
-    padding-top: 0;
-    margin-top: 0;
+    margin: 0;
+    padding: 0;
 }
 """
 
@@ -2889,23 +2886,25 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         if list_row is None:
             list_row = Gtk.ListBoxRow()
             list_row.set_name("my_computer")
-            row_revealer = Gtk.Revealer()
-            row_revealer.set_name("my_computer_revealer")
-            row_revealer.set_reveal_child(True)
-            row_revealer.set_transition_type(Gtk.RevealerTransitionType.NONE)
+            # No revealer: the box must be a direct child of the row so that
+            # the Nautilus CSS rule `sidebar .navigation-sidebar > row > box`
+            # matches and applies `padding: 3px 14px; border-spacing: 12px`.
+            # Wrapping in a Revealer would break the `>` strict combinator.
+            # icon margin-end: 8 mirrors nautilus-sidebar-row.blp.
             row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
             row_box.set_name("my_computer_box")
             icon = Gtk.Image.new_from_icon_name(COMPUTER_ICON)
             icon.set_name("my_computer_icon")
             icon.set_icon_size(Gtk.IconSize.NORMAL)
+            icon.set_margin_end(8)
             label = Gtk.Label(label=_LOCATION_TITLE)
             label.set_name("my_computer_label")
             label.set_xalign(0.0)
             label.set_hexpand(True)
+            label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
             row_box.append(icon)
             row_box.append(label)
-            row_revealer.set_child(row_box)
-            list_row.set_child(row_revealer)
+            list_row.set_child(row_box)
 
         our_listbox.append(list_row)
         our_listbox.connect(

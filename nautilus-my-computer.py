@@ -403,6 +403,7 @@ _CSS = b"""
 .vanilla-diskinfo-view-hidden > * {
     opacity: 0;
 }
+/* For testing/debugging: shows injected panel outline vs native sidebar. */
 .gap-debug {
     margin: 0;
     padding: 0;
@@ -419,9 +420,23 @@ _CSS = b"""
 #my_computer_list > row {
     padding: 0 14px;
 }
+/* Fallback row only (row > box > image, not row > revealer > box > image).
+   Mirrors nautilus-sidebar-row.blp Image { margin-end: 8 }. */
+#my_computer_list > row > box > image {
+    margin-end: 8px;
+}
 .places-sidebar-list {
     margin: 0;
     padding: 0;
+}
+/* NautilusSidebar has a default top margin; zero it so our row sits flush above it. */
+.my-computer-sidebar {
+    margin-top: 0;
+}
+/* Inner GtkScrolledWindow inside NautilusSidebar (disabled scroll policy);
+   reset its top margin to close the gap under our injected row. */
+.my-computer-inner-scroll {
+    margin-top: 0;
 }
 """
 
@@ -2886,17 +2901,14 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         if list_row is None:
             list_row = Gtk.ListBoxRow()
             list_row.set_name("my_computer")
-            # No revealer: the box must be a direct child of the row so that
-            # the Nautilus CSS rule `sidebar .navigation-sidebar > row > box`
-            # matches and applies `padding: 3px 14px; border-spacing: 12px`.
-            # Wrapping in a Revealer would break the `>` strict combinator.
-            # icon margin-end: 8 mirrors nautilus-sidebar-row.blp.
+            # No revealer: box is a direct child of row so CSS `row > box` works.
+            # libadwaita's rule targets `row > revealer`; we replicate the inset
+            # via `#my_computer_list > row { padding: 0 14px }` in _CSS instead.
             row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
             row_box.set_name("my_computer_box")
             icon = Gtk.Image.new_from_icon_name(COMPUTER_ICON)
             icon.set_name("my_computer_icon")
             icon.set_icon_size(Gtk.IconSize.NORMAL)
-            icon.set_margin_end(8)
             label = Gtk.Label(label=_LOCATION_TITLE)
             label.set_name("my_computer_label")
             label.set_xalign(0.0)
@@ -3003,15 +3015,13 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         for w in _all_widgets(nautilus_sidebar):
             if isinstance(w, Gtk.ScrolledWindow):
                 w.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
-                w.set_margin_top(0)
+                w.add_css_class("my-computer-inner-scroll")
                 _log("_inject_sidebar_link: inner scroll disabled ✓")
             elif isinstance(w, Gtk.ListBox):
                 native_listbox = w
 
-        nautilus_sidebar.set_margin_top(0)
-        our_listbox.set_margin_bottom(0)
+        nautilus_sidebar.add_css_class("my-computer-sidebar")
         if native_listbox is not None:
-            native_listbox.set_margin_top(0)
             native_listbox.add_css_class("places-sidebar-list")
 
         # Cross-deselect: selecting in one listbox clears the other so only

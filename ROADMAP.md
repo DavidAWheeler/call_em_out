@@ -5,8 +5,8 @@ Planned fixes, features, and improvements. Subject to change as the project evol
 ---
 
 ## In progress
-- ux: adjust top margin of Computer button
-- ux: adjust Computer button style to use native styles
+- i18n: finalize all UI strings in the Computer view and Settings panel
+- i18n: update and complete translations for all supported languages
 
 ## Next up
 - fix: disk cards update on connect

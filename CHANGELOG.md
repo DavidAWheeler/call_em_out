@@ -8,6 +8,12 @@ All notable changes to this project are documented here.
 ### UX
 - Reduced vertical spacing between group labels and their disk cards in the Computer view
 
+### Fixed
+- Computer sidebar row icon and label now align with native Nautilus rows (Home, Recent, etc.)
+
+### Maintenance
+- All sidebar spacing values (icon gap, row padding, top margin) centralized into the CSS block; no more scattered `set_margin_*` calls in Python
+
 ---
 
 ## v0.5.1

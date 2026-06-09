@@ -65,7 +65,7 @@ DEBUG_SELFTEST = _flag("MC_SELFTEST", default=False)  # in-process navigation se
 
 # ── Extension metadata (keep in sync with pyproject.toml) ────────────────────
 EXT_NAME = "My Computer for Nautilus"
-EXT_VERSION = "0.4.6"
+EXT_VERSION = "0.5.0"
 EXT_AUTHOR = "Yann Masoch"
 EXT_LICENSE = "MIT"
 EXT_GITHUB = "https://github.com/yannmasoch/nautilus-my-computer"
@@ -275,32 +275,45 @@ def _build_uuid_map() -> dict[str, str]:
     return result
 
 
+def _is_system_mount(m: MountInfo) -> bool:
+    """True for root, boot, EFI, and swap - mounts that belong to the System group."""
+    return (
+        m.mountpoint == "/" or m.mountpoint in ("/boot", "/boot/efi", "/efi") or m.fstype == "swap"
+    )
+
+
 def _classify_mount(m: MountInfo) -> str:
-    """Return 'local', 'removable', 'disc', or 'network' for a mount entry."""
+    """Return 'system', 'local', 'removable', 'disc', or 'network' for a mount entry."""
     # Unmounted volumes are never part of the running system.
-    # Removable (USB, optical) → "Removable Devices"; others → "On this computer"
+    # Removable (USB, optical) -> "Removable Devices"; others -> "On this computer"
     if not m.is_mounted:
         return "removable" if m.is_removable else "local"
 
-    # GVfs mounts — phones/cameras (MTP, PTP) go to removable; rest are network
+    # GVfs mounts -- phones/cameras (MTP, PTP) go to removable; rest are network
     if m.is_gio:
         if m.nav_uri.startswith(("mtp://", "gphoto2://", "afc://", "obex://")):
             return "removable"
         return "network"
 
-    # Optical filesystems (loop-mounted images and physical discs)
+    # Removable-media paths: check path before fstype so USB drives (including live Linux
+    # USBs with iso9660 partitions) are not misclassified as discs. Exception: loop-mounted
+    # ISO images also land under /run/media/ but their device is /dev/loopN -- those are discs.
+    if any(m.mountpoint.startswith(p) for p in EXTERNAL_PREFIXES):
+        if m.fstype in OPTICAL_FSTYPES and m.device.startswith("/dev/loop"):
+            return "disc"
+        return "removable" if m.is_removable else "local"
+
+    # Optical filesystems not under external paths -> physical disc or image
     if m.fstype in OPTICAL_FSTYPES:
         return "disc"
 
-    # Removable-media paths always → check removable flag first, then local.
-    # This ensures NTFS/fuseblk drives at /run/media/ are not misclassified
-    # as network just because their fstype starts with "fuse".
-    if any(m.mountpoint.startswith(p) for p in EXTERNAL_PREFIXES):
-        return "removable" if m.is_removable else "local"
-
-    # x-gvfs-show fstab entries and known network fstypes → network
+    # x-gvfs-show fstab entries and known network fstypes -> network
     if "x-gvfs-show" in m.opts or m.fstype in NETWORK_FSTYPES or m.fstype.startswith("fuse"):
         return "network"
+
+    # Root, boot/EFI, swap -> System group
+    if _is_system_mount(m):
+        return "system"
 
     return "local"
 
@@ -321,19 +334,38 @@ def _get_local_mount_tier(m: MountInfo) -> tuple[int, str]:
 
 # Icon per group category
 _GROUP_ICON = {
+    "system": "drive-harddisk",
     "local": "drive-harddisk",
     "removable": "drive-removable-media",
     "disc": "media-optical",
     "network": "folder-remote",
 }
 
-# Display names and order for the groups
-_GROUPS: list[tuple[str, str]] = [
-    ("local", "On this computer"),
-    ("removable", "Removable Devices"),
-    ("disc", "Disc Images"),
-    ("network", "Network Volumes"),
+# Ordered group spec: (key, display_label, gsettings_key, can_merge)
+# can_merge=False means this group is the merge target ("On this computer")
+_GROUP_SPEC: list[tuple[str, str, str, bool]] = [
+    ("system", "System", "visibility-system", True),
+    ("local", "On this computer", "visibility-local", False),
+    ("removable", "Removable Devices", "visibility-removable", True),
+    ("disc", "Disc Images", "visibility-disc", True),
+    ("network", "Network Volumes", "visibility-network", True),
 ]
+
+
+@dataclasses.dataclass
+class DiskGroup:
+    key: str
+    label: str
+    visible: bool = True
+    merged: bool = False
+    items: list = dataclasses.field(default_factory=list)
+
+    def add_item(self, m) -> None:
+        self.items.append(m)
+
+    def sort_items(self, key_func, reverse: bool = False) -> None:
+        self.items.sort(key=key_func, reverse=reverse)
+
 
 _disk_data: dict[str, MountInfo] = {}
 _network_places: list[MountInfo] = []  # populated async from network:///
@@ -468,7 +500,7 @@ def _format_size(n: float) -> str:
     return f"{n:.1f} EB"
 
 
-def _scan_mounts(hide_boot_efi: bool = False) -> list[MountInfo]:
+def _scan_mounts(show_system_partitions: bool = False) -> list[MountInfo]:
     mounts: list[MountInfo] = []
     seen: set[str] = set()
     uuid_map = _build_uuid_map()
@@ -512,7 +544,7 @@ def _scan_mounts(hide_boot_efi: bool = False) -> list[MountInfo]:
                     fstype not in REAL_FSTYPES and not gvfs_show and not is_external
                 ) or device in seen:
                     continue
-                if hide_boot_efi and mountpoint in ("/boot", "/boot/efi", "/efi"):
+                if not show_system_partitions and mountpoint in ("/boot", "/boot/efi", "/efi"):
                     continue
                 seen.add(device)
                 try:
@@ -932,10 +964,10 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         else:
             self._start_on_disks = False
 
-        _hide_boot_efi = (
-            self._gsettings.get_boolean("hide-system-partitions") if self._gsettings else False
+        _show_sys_parts = (
+            self._gsettings.get_boolean("show-system-partitions") if self._gsettings else False
         )
-        _refresh(_scan_mounts(_hide_boot_efi) + _scan_gio_mounts() + _scan_gio_volumes())
+        _refresh(_scan_mounts(_show_sys_parts) + _scan_gio_mounts() + _scan_gio_volumes())
 
         # Watch /proc/mounts at the kernel level — POLLPRI fires on any
         # mount/unmount regardless of how it happened (udisks, manual, FUSE…)
@@ -1198,8 +1230,12 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             self._start_on_disks = settings.get_boolean(key)
         elif key in ("color-mode", "custom-color", "gradient-color-1", "gradient-color-2"):
             self._apply_bar_color()
-        elif key == "hide-system-partitions":
+        elif key == "show-system-partitions":
+            # Needs a rescan because filtered mounts must be re-collected
             self._schedule_live_refresh()
+        elif key.startswith("visibility-"):
+            # Grouping change only -- no rescan needed, just re-render
+            self._repopulate_visible()
 
     def _apply_bar_color(self) -> None:
         if not self._gsettings or self._bar_css_display is None:
@@ -1368,10 +1404,10 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
     def _do_live_refresh(self) -> bool:
         self._refresh_pending = False
-        _hide_boot_efi = (
-            self._gsettings.get_boolean("hide-system-partitions") if self._gsettings else False
+        _show_sys_parts = (
+            self._gsettings.get_boolean("show-system-partitions") if self._gsettings else False
         )
-        _refresh(_scan_mounts(_hide_boot_efi) + _scan_gio_mounts() + _scan_gio_volumes())
+        _refresh(_scan_mounts(_show_sys_parts) + _scan_gio_mounts() + _scan_gio_volumes())
         # Re-discover network places in background; callback will repopulate
         _refresh_network_places(on_done=self._repopulate_visible)
         self._repopulate_visible()
@@ -1734,71 +1770,110 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         section_flows: list[Gtk.FlowBox] = []
         card_widgets = {}
 
-        # Classify
-        by_group: dict[str, list] = {
-            "local": [],
-            "removable": [],
-            "disc": [],
-            "network": [],
-        }
-        for m in _disk_data.values():
-            by_group[_classify_mount(m)].append(m)
-
-        active_uris = {m.nav_uri for m in _disk_data.values()}
-        for place in _network_places:
-            if place.nav_uri not in active_uris:
-                by_group["network"].append(place)
-
         col = self._sort_column
         rev = self._sort_reverse
 
         def _sort_key(m: MountInfo):
             if col == "size":
                 return m.total
-            else:
-                return (m.display_name or "").lower()
+            return (m.display_name or "").lower()
 
-        for gkey in ("local", "removable", "disc", "network"):
-            items = by_group[gkey]
-            if gkey == "local":
+        # Build DiskGroup objects, reading visibility state from gsettings
+        groups: dict[str, DiskGroup] = {}
+        for gkey, glabel, gskey, can_merge in _GROUP_SPEC:
+            vis_str = self._gsettings.get_string(gskey) if self._gsettings else "visible"
+            visible = vis_str != "hidden"
+            # "On this computer" (local) is the merge target -- never merged itself
+            merged = can_merge and vis_str == "merged"
+            groups[gkey] = DiskGroup(key=gkey, label=_(glabel), visible=visible, merged=merged)
+
+        # Classify each mount into its group
+        for m in _disk_data.values():
+            groups[_classify_mount(m)].add_item(m)
+
+        active_uris = {m.nav_uri for m in _disk_data.values()}
+        for place in _network_places:
+            if place.nav_uri not in active_uris:
+                groups["network"].add_item(place)
+
+        # Sort each group's items
+        for gkey, group in groups.items():
+            if gkey in ("system", "local"):
                 if col == "type":
-                    # Sort by type: root → system partitions → mounted → unmounted
-                    items.sort(key=_get_local_mount_tier, reverse=False)
+                    group.sort_items(key_func=_get_local_mount_tier, reverse=False)
                 else:
-                    # For any sort mode: mounted first, then unmounted (always last)
-                    mounted_items = [m for m in items if m.is_mounted]
-                    unmounted = [m for m in items if not m.is_mounted]
-                    mounted_items.sort(key=_sort_key, reverse=rev)
+                    mounted = [m for m in group.items if m.is_mounted]
+                    unmounted = [m for m in group.items if not m.is_mounted]
+                    mounted.sort(key=_sort_key, reverse=rev)
                     unmounted.sort(key=_sort_key, reverse=rev)
-                    items = mounted_items + unmounted
-                by_group[gkey] = items
+                    group.items = mounted + unmounted
             elif gkey == "removable":
-                mounted_items = [m for m in items if m.is_mounted]
-                unmounted = [m for m in items if not m.is_mounted]
-                mounted_items.sort(key=_sort_key, reverse=rev)
+                mounted = [m for m in group.items if m.is_mounted]
+                unmounted = [m for m in group.items if not m.is_mounted]
+                mounted.sort(key=_sort_key, reverse=rev)
                 unmounted.sort(key=_sort_key, reverse=rev)
-                by_group[gkey] = mounted_items + unmounted
+                group.items = mounted + unmounted
             else:
-                items.sort(key=_sort_key, reverse=rev)
-                by_group[gkey] = items
+                group.sort_items(key_func=_sort_key, reverse=rev)
 
-        group_labels = {key: _(lbl) for key, lbl in _GROUPS}
+        # Merge pass: fold items from merged groups into "local", preserving origin key
+        # Each entry in local_extra is (MountInfo, origin_group_key)
+        local_extra: list[tuple] = []
+        # Fixed group-level order for sort-by-type within the merged "On this computer" group:
+        # system=0, local=1, removable=2, disc=3, network=4
+        _merge_type_order = {"system": 0, "local": 1, "removable": 2, "disc": 3, "network": 4}
+        for gkey, _gl, _gs, _cm in _GROUP_SPEC:
+            group = groups[gkey]
+            if gkey != "local" and group.merged:
+                for m in group.items:
+                    local_extra.append((m, gkey))
+
+        # Build render order: fixed spec order, only groups that are visible and not merged
         size_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+        is_list = self._view_mode == "list-view"
 
-        for group_key, _group_label in _GROUPS:
-            items = by_group[group_key]
-            if not items:
+        for gkey, _glabel, _gskey, _can_merge in _GROUP_SPEC:
+            group = groups[gkey]
+            # "local" is the merge target: render it whenever it has its own items
+            # OR has received merged items, even if the group itself is set to hidden.
+            if gkey == "local":
+                if not group.visible and not local_extra:
+                    continue
+            elif not group.visible or group.merged:
+                continue
+
+            # For "local", append any merged items (with their origin keys).
+            # If local itself is hidden, only the merged extras show.
+            render_items: list[tuple]  # (MountInfo, icon_group_key)
+            if gkey == "local":
+                own = [(m, "local") for m in group.items] if group.visible else []
+                render_items = own + local_extra
+                if col == "type" and local_extra:
+                    # Sort the combined list by group-level tier, then intra-group tier
+                    def _merged_type_key(entry, _order=_merge_type_order):
+                        m, origin = entry
+                        group_tier = _order.get(origin, 5)
+                        if origin in ("system", "local"):
+                            sub = _get_local_mount_tier(m)
+                        else:
+                            sub = (0 if m.is_mounted else 1, (m.display_name or "").lower())
+                        return (group_tier,) + sub
+
+                    render_items.sort(key=_merged_type_key)
+            else:
+                render_items = [(m, gkey) for m in group.items]
+
+            if not render_items:
                 continue
 
             heading = Gtk.Label()
-            heading.set_label(group_labels[group_key])
+            heading.set_label(group.label)
             heading.set_xalign(0.0)
             heading.get_style_context().add_class("heading")
             heading.set_margin_top(12)
             heading.set_margin_start(6)
             grid_box.append(heading)
 
-            is_list = self._view_mode == "list-view"
             container = Gtk.FlowBox()
             container.set_homogeneous(True)
             container.set_max_children_per_line(1 if is_list else _FLOW_COLS_GRID)
@@ -1812,8 +1887,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             container.connect("child-activated", self._on_card_activated, win)
             container.connect("selected-children-changed", self._on_flow_selection_changed, win)
             section_flows.append(container)
-            for m in items:
-                card = self._build_disk_card(m, group_key, win, card_widgets)
+
+            for m, origin_key in render_items:
+                card = self._build_disk_card(m, origin_key, win, card_widgets)
                 size_group.add_widget(card)
                 container.append(card)
 
@@ -2390,13 +2466,43 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         self._gsettings.bind("start-on-disks", start_row, "active", Gio.SettingsBindFlags.DEFAULT)
         gen_group.add(start_row)
 
-        hide_sys_row = Adw.SwitchRow()
-        hide_sys_row.set_title(_("Hide system partitions"))
-        hide_sys_row.set_subtitle(_("Hide boot and EFI drives"))
+        vis_group = Adw.PreferencesGroup()
+        vis_group.set_title(_("Visibility"))
+        page.add(vis_group)
+
+        show_sys_parts_row = Adw.SwitchRow()
+        show_sys_parts_row.set_title(_("Show system partitions"))
+        show_sys_parts_row.set_subtitle(_("Show boot and EFI partitions in the System group"))
         self._gsettings.bind(
-            "hide-system-partitions", hide_sys_row, "active", Gio.SettingsBindFlags.DEFAULT
+            "show-system-partitions", show_sys_parts_row, "active", Gio.SettingsBindFlags.DEFAULT
         )
-        gen_group.add(hide_sys_row)
+        vis_group.add(show_sys_parts_row)
+
+        _vis_map = ["visible", "merged", "hidden"]
+        _vis_labels_full = [_("Visible"), _("Merged"), _("Hidden")]
+        _vis_labels_local = [_("Visible"), _("Hidden")]
+
+        for gkey, glabel, gskey, can_merge in _GROUP_SPEC:
+            if can_merge:
+                model = Gtk.StringList.new(_vis_labels_full)
+                key_map = _vis_map
+            else:
+                model = Gtk.StringList.new(_vis_labels_local)
+                key_map = ["visible", "hidden"]
+
+            combo = Adw.ComboRow()
+            combo.set_title(_(glabel))
+            combo.set_model(model)
+            current = self._gsettings.get_string(gskey)
+            combo.set_selected(key_map.index(current) if current in key_map else 0)
+
+            def _on_vis_changed(c, _param, _gskey=gskey, _key_map=key_map):
+                idx = c.get_selected()
+                if 0 <= idx < len(_key_map):
+                    self._gsettings.set_string(_gskey, _key_map[idx])
+
+            combo.connect("notify::selected", _on_vis_changed)
+            vis_group.add(combo)
 
         color_group = Adw.PreferencesGroup()
         color_group.set_title(_("Disk Usage Color"))

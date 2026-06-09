@@ -4,9 +4,7 @@ Planned fixes, features, and improvements. Subject to change as the project evol
 
 ---
 
-## In progress - v0.5.0
-- feat: configurable System disk group available in Settings
-- refactor: disk group class objects
+## In progress - v0.5.x
 - ux: reduce space between group label and cards
 - ux: adjust top margin of Computer button
 - ux: adjust Computer button style to use native styles

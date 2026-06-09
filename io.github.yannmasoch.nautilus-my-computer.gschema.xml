@@ -1,11 +1,53 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
+  <enum id="io.github.yannmasoch.nautilus-my-computer.visibility">
+    <value nick="visible" value="0"/>
+    <value nick="merged" value="1"/>
+    <value nick="hidden" value="2"/>
+  </enum>
+
   <schema id="io.github.yannmasoch.nautilus-my-computer" path="/io/github/yannmasoch/nautilus-my-computer/">
 
     <key name="start-on-disks" type="b">
       <default>false</default>
       <summary>Start on Computer view</summary>
       <description>Show the disk panel when Nautilus opens</description>
+    </key>
+
+    <key name="show-system-partitions" type="b">
+      <default>false</default>
+      <summary>Show system partitions</summary>
+      <description>Show boot and EFI partitions in the System group</description>
+    </key>
+
+    <key name="visibility-system" enum="io.github.yannmasoch.nautilus-my-computer.visibility">
+      <default>'visible'</default>
+      <summary>System group visibility</summary>
+      <description>How the System group is displayed: visible, merged into On this computer, or hidden</description>
+    </key>
+
+    <key name="visibility-local" enum="io.github.yannmasoch.nautilus-my-computer.visibility">
+      <default>'visible'</default>
+      <summary>On this computer group visibility</summary>
+      <description>Whether the On this computer group is shown or hidden</description>
+    </key>
+
+    <key name="visibility-removable" enum="io.github.yannmasoch.nautilus-my-computer.visibility">
+      <default>'visible'</default>
+      <summary>Removable Devices group visibility</summary>
+      <description>How the Removable Devices group is displayed: visible, merged, or hidden</description>
+    </key>
+
+    <key name="visibility-disc" enum="io.github.yannmasoch.nautilus-my-computer.visibility">
+      <default>'visible'</default>
+      <summary>Disc Images group visibility</summary>
+      <description>How the Disc Images group is displayed: visible, merged, or hidden</description>
+    </key>
+
+    <key name="visibility-network" enum="io.github.yannmasoch.nautilus-my-computer.visibility">
+      <default>'visible'</default>
+      <summary>Network Volumes group visibility</summary>
+      <description>How the Network Volumes group is displayed: visible, merged, or hidden</description>
     </key>
 
     <key name="color-mode" type="s">
@@ -30,12 +72,6 @@
       <default>'#D574C1'</default>
       <summary>Gradient end color</summary>
       <description>Right color (stop 100%) used when color-mode is gradient</description>
-    </key>
-
-    <key name="hide-system-partitions" type="b">
-      <default>true</default>
-      <summary>Hide system partitions</summary>
-      <description>Hide partitions like boot and EFI</description>
     </key>
 
   </schema>

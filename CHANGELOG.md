@@ -4,6 +4,24 @@ All notable changes to this project are documented here.
 
 ---
 
+## [0.5.0]
+### Added
+- New "System" group separating root, boot, EFI, and swap from regular drives
+- Per-group visibility control: each group can be Visible, Merged into "On this computer", or Hidden
+- "Show system partitions" toggle to include boot and EFI entries in the System group (default off)
+- Sort-by-type ordering in the merged "On this computer" view: System first, then local drives, then removable, disc, network
+- `DiskGroup` dataclass encapsulating group logic and state
+
+### Changed
+- Five groups total: System, On this computer, Removable Devices, Disc Images, Network Volumes
+- Settings: replaced `hide-system-partitions` with `show-system-partitions` (inverted, same default behavior)
+
+### Fixed
+- USB drives running a Linux system (iso9660 filesystem) now correctly appear in Removable Devices instead of Disc Images
+- Loop-mounted ISO images continue to appear in Disc Images regardless of mount path
+
+---
+
 ## [0.4.6]
 ### Fixed
 - Installer `--branch` and `--version` are now independent axes, not mutually exclusive

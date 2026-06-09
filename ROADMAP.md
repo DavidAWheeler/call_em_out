@@ -5,7 +5,6 @@ Planned fixes, features, and improvements. Subject to change as the project evol
 ---
 
 ## In progress
-- ux: reduce space between group label and cards
 - ux: adjust top margin of Computer button
 - ux: adjust Computer button style to use native styles
 

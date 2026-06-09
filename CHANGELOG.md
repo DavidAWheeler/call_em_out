@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.5.2
+### UX
+- Reduced vertical spacing between group labels and their disk cards in the Computer view
+
+---
+
 ## v0.5.1
 ### UX
 - Settings page labels and descriptions improved across all sections

@@ -65,7 +65,7 @@ DEBUG_SELFTEST = _flag("MC_SELFTEST", default=False)  # in-process navigation se
 
 # ── Extension metadata (keep in sync with pyproject.toml) ────────────────────
 EXT_NAME = "My Computer for Nautilus"
-EXT_VERSION = "0.5.1"
+EXT_VERSION = "0.5.2"
 EXT_AUTHOR = "Yann Masoch"
 EXT_LICENSE = "MIT"
 EXT_GITHUB = "https://github.com/yannmasoch/nautilus-my-computer"
@@ -1710,7 +1710,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
     # ── Panel construction ────────────────────────────────────────────────────
 
     def _new_grid_box(self) -> Gtk.Box:
-        grid_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
+        grid_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         grid_box.set_hexpand(True)
         grid_box.set_valign(Gtk.Align.START)
         grid_box.set_margin_start(18)
@@ -1889,6 +1889,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             container.set_max_children_per_line(1 if is_list else _FLOW_COLS_GRID)
             container.set_column_spacing(16)
             container.set_row_spacing(6)
+            container.set_margin_bottom(12)
             container.set_selection_mode(Gtk.SelectionMode.SINGLE)
             container.set_activate_on_single_click(False)
             container.set_hexpand(True)

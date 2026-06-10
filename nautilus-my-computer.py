@@ -429,15 +429,6 @@ _CSS = b"""
     margin: 0;
     padding: 0;
 }
-/* NautilusSidebar has a default top margin; zero it so our row sits flush above it. */
-.my-computer-sidebar {
-    margin-top: 0;
-}
-/* Inner GtkScrolledWindow inside NautilusSidebar (disabled scroll policy);
-   reset its top margin to close the gap under our injected row. */
-.my-computer-inner-scroll {
-    margin-top: 0;
-}
 """
 
 
@@ -3015,12 +3006,12 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         for w in _all_widgets(nautilus_sidebar):
             if isinstance(w, Gtk.ScrolledWindow):
                 w.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
-                w.add_css_class("my-computer-inner-scroll")
+                w.set_margin_top(0)
                 _log("_inject_sidebar_link: inner scroll disabled ✓")
             elif isinstance(w, Gtk.ListBox):
                 native_listbox = w
 
-        nautilus_sidebar.add_css_class("my-computer-sidebar")
+        nautilus_sidebar.set_margin_top(0)
         if native_listbox is not None:
             native_listbox.add_css_class("places-sidebar-list")
 

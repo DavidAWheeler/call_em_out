@@ -12,7 +12,7 @@ All notable changes to this project are documented here.
 - Computer sidebar row icon and label now align with native Nautilus rows (Home, Recent, etc.)
 
 ### Maintenance
-- All sidebar spacing values (icon gap, row padding, top margin) centralized into the CSS block; no more scattered `set_margin_*` calls in Python
+- Sidebar design values (icon gap, row inset padding) moved to the centralized CSS block
 
 ---
 

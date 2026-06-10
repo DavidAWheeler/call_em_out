@@ -137,3 +137,9 @@ msgstr "Ocultar particions del sistema"
 
 msgid "Hide boot and EFI drives"
 msgstr "Ocultar unitats d'arrencada (Boot i EFI)"
+
+msgid "Open My Computer"
+msgstr "Obrir Ordinador"
+
+msgid "On this computer"
+msgstr "En aquest ordinador"

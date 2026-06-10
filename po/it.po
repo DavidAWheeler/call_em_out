@@ -137,3 +137,9 @@ msgstr "Nascondi partizioni di sistema"
 
 msgid "Hide boot and EFI drives"
 msgstr "Nascondi le unità di avvio (Boot e EFI)"
+
+msgid "Open My Computer"
+msgstr "Apri Computer"
+
+msgid "On this computer"
+msgstr "Su questo computer"

@@ -65,7 +65,7 @@ DEBUG_SELFTEST = _flag("MC_SELFTEST", default=False)  # in-process navigation se
 
 # ── Extension metadata (keep in sync with pyproject.toml) ────────────────────
 EXT_NAME = "My Computer for Nautilus"
-EXT_VERSION = "0.5.2"
+EXT_VERSION = "0.5.3"
 EXT_AUTHOR = "Yann Masoch"
 EXT_LICENSE = "MIT"
 EXT_GITHUB = "https://github.com/yannmasoch/nautilus-my-computer"
@@ -503,11 +503,7 @@ def _get_gsettings() -> Gio.Settings | None:
 
 
 def _format_size(n: float) -> str:
-    for unit in ("B", "KB", "MB", "GB", "TB", "PB"):
-        if n < 1000:
-            return f"{n:.1f} {unit}"
-        n /= 1000
-    return f"{n:.1f} EB"
+    return GLib.format_size(int(n))
 
 
 def _scan_mounts(show_system_partitions: bool = False) -> list[MountInfo]:

@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.5.3
+### i18n
+- Disk size units now use `GLib.format_size()` for locale-aware output (e.g. "Ko / Mo / Go" in French, "octet" for bytes) - no custom unit translations needed
+
+---
+
 ## v0.5.2
 ### UX
 - Reduced vertical spacing between group labels and their disk cards in the Computer view

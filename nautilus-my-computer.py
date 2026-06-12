@@ -65,7 +65,7 @@ DEBUG_SELFTEST = _flag("MC_SELFTEST", default=False)  # in-process navigation se
 
 # ── Extension metadata (keep in sync with pyproject.toml) ────────────────────
 EXT_NAME = "My Computer for Nautilus"
-EXT_VERSION = "0.5.3"
+EXT_VERSION = "0.5.4"
 EXT_AUTHOR = "Yann Masoch"
 EXT_LICENSE = "MIT"
 EXT_GITHUB = "https://github.com/yannmasoch/nautilus-my-computer"
@@ -1234,7 +1234,12 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
     def _on_settings_changed(self, settings: Gio.Settings, key: str) -> None:
         if key == "start-on-disks":
             self._start_on_disks = settings.get_boolean(key)
-        elif key in ("color-mode", "custom-color", "gradient-color-1", "gradient-color-2"):
+        elif key in (
+            "color-mode",
+            "custom-color",
+            "custom-gradient-color-1",
+            "custom-gradient-color-2",
+        ):
             self._apply_bar_color()
         elif key == "show-system-partitions":
             # Needs a rescan because filtered mounts must be re-collected
@@ -1251,8 +1256,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             color = self._gsettings.get_string("custom-color")
             css = f".diskinfo-bar block.filled {{ background: {color}; }}".encode()
         elif mode == "gradient":
-            c1 = self._gsettings.get_string("gradient-color-1")
-            c2 = self._gsettings.get_string("gradient-color-2")
+            c1 = self._gsettings.get_string("custom-gradient-color-1")
+            c2 = self._gsettings.get_string("custom-gradient-color-2")
             # Use CSS :dir() so GTK resolves direction per-widget at render time.
             # Gradient spans the filled area directly — no background-size trickery,
             # which is unreliable on older GTK4 (e.g. Ubuntu 22.04 / GTK 4.6.x).
@@ -2597,7 +2602,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         start_row = Adw.SwitchRow()
         start_row.set_title(_("Start on the Computer view"))
-        start_row.set_subtitle(_("Open Nautilus directly to the Computer view instead of Home"))
+        start_row.set_subtitle(_("Launch directly to the Computer view instead of Home"))
         self._gsettings.bind("start-on-disks", start_row, "active", Gio.SettingsBindFlags.DEFAULT)
         gen_group.add(start_row)
 
@@ -2643,13 +2648,15 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         vis_group.add(show_sys_parts_row)
 
         color_group = Adw.PreferencesGroup()
-        color_group.set_title(_("Usage Bar Color"))
-        color_group.set_description(_("Select or customize the usage bar color."))
+        color_group.set_title(_("Bar Color"))
+        color_group.set_description(_("Select or customize the bar color."))
         page.add(color_group)
 
         mode_row = Adw.ComboRow()
         mode_row.set_title(_("Color mode"))
-        mode_model = Gtk.StringList.new([_("System accent"), _("Custom color"), _("Gradient")])
+        mode_model = Gtk.StringList.new(
+            [_("System accent"), _("Custom color"), _("Custom gradient")]
+        )
         mode_row.set_model(mode_model)
         _mode_map = ["accent", "flat", "gradient"]
         current_mode = self._gsettings.get_string("color-mode")
@@ -2686,11 +2693,11 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         grad_row1.set_title(_("Start color"))
         grad_btn1 = Gtk.ColorDialogButton(dialog=color_dialog)
         grad_btn1.set_valign(Gtk.Align.CENTER)
-        grad_btn1.set_rgba(_hex_to_rgba(self._gsettings.get_string("gradient-color-1")))
+        grad_btn1.set_rgba(_hex_to_rgba(self._gsettings.get_string("custom-gradient-color-1")))
         grad_btn1.connect(
             "notify::rgba",
             lambda btn, _: self._gsettings.set_string(
-                "gradient-color-1", _rgba_to_hex(btn.get_rgba())
+                "custom-gradient-color-1", _rgba_to_hex(btn.get_rgba())
             ),
         )
         grad_row1.add_suffix(grad_btn1)
@@ -2700,11 +2707,11 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         grad_row2.set_title(_("End color"))
         grad_btn2 = Gtk.ColorDialogButton(dialog=color_dialog)
         grad_btn2.set_valign(Gtk.Align.CENTER)
-        grad_btn2.set_rgba(_hex_to_rgba(self._gsettings.get_string("gradient-color-2")))
+        grad_btn2.set_rgba(_hex_to_rgba(self._gsettings.get_string("custom-gradient-color-2")))
         grad_btn2.connect(
             "notify::rgba",
             lambda btn, _: self._gsettings.set_string(
-                "gradient-color-2", _rgba_to_hex(btn.get_rgba())
+                "custom-gradient-color-2", _rgba_to_hex(btn.get_rgba())
             ),
         )
         grad_row2.add_suffix(grad_btn2)
@@ -2743,7 +2750,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         github_row = Adw.ActionRow()
         github_row.set_title(_("Source code"))
-        github_btn = Gtk.LinkButton(uri=EXT_GITHUB, label=_("GitHub ↗"))
+        github_btn = Gtk.LinkButton(uri=EXT_GITHUB, label=_("GitHub"))
         github_btn.get_style_context().add_class("flat")
         github_btn.set_valign(Gtk.Align.CENTER)
         github_row.add_suffix(github_btn)

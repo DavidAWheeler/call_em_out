@@ -12,53 +12,110 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n > 1;\n"
 
-msgid "My Computer Settings"
-msgstr "Paramètres de My Computer"
+#——————————————————————————————
+# Panel - Group labels
+#——————————————————————————————
+
+msgid "On this Computer"
+msgstr "Sur cet ordinateur"
 
 msgid "System"
 msgstr "Système"
 
-msgid "Devices and Drives"
-msgstr "Appareils et disques"
+msgid "Removable"
+msgstr "Amovible"
 
-msgid "Removable Devices"
-msgstr "Périphériques amovibles"
-
-msgid "Disc Images"
-msgstr "Images disque"
+msgid "Disc"
+msgstr "Disque"
 
 msgid "Network Volumes"
 msgstr "Volumes réseau"
 
+#——————————————————————————————
+# Panel - Disk card
+#——————————————————————————————
+
+msgid "{free} free of {total}"
+msgstr "{free} disponible sur {total}"
+
 msgid "Not mounted"
 msgstr "Non monté"
+
+#——————————————————————————————
+# Panel - Disk card actions
+#——————————————————————————————
+
+msgid "Open"
+msgstr "Ouvrir"
+
+msgid "Open in New Tab"
+msgstr "Ouvrir dans un nouvel onglet"
+
+msgid "Open in New Window"
+msgstr "Ouvrir dans une nouvelle fenêtre"
+
+msgid "Mount"
+msgstr "Monter"
+
+msgid "Unmount"
+msgstr "Démonter"
+
+msgid "Eject"
+msgstr "Éjecter"
+
+msgid "Properties"
+msgstr "Propriétés"
 
 msgid "Format…"
 msgstr "Formater…"
 
+#——————————————————————————————
+# Sidebar
+#——————————————————————————————
+
+msgid "Computer"
+msgstr "Ordinateur"
+
+msgid "Open My Computer"
+msgstr "Ouvrir My Computer"
+
+#——————————————————————————————
+# Preferences - General
+#——————————————————————————————
+
+msgid "My Computer Settings"
+msgstr "Paramètres de My Computer"
+
 msgid "General"
 msgstr "Général"
 
-msgid "Start on Computer view"
+msgid "Start on the Computer view"
 msgstr "Démarrer sur la vue Ordinateur"
 
-msgid "Show the disk panel when Nautilus opens"
-msgstr "Afficher le panneau disques à l'ouverture de Nautilus"
+msgid "Launch directly to the Computer view instead of Home"
+msgstr "Démarrer directement sur la vue Ordinateur au lieu de Dossier personnel"
 
-msgid "Disk Usage Color"
-msgstr "Couleur d'utilisation du disque"
+#——————————————————————————————
+# Preferences - Bar Color
+#——————————————————————————————
+
+msgid "Bar Color"
+msgstr "Couleur de la barre"
+
+msgid "Select or customize the bar color."
+msgstr "Sélectionner ou personnaliser la couleur de la barre."
 
 msgid "Color mode"
 msgstr "Mode couleur"
 
 msgid "System accent"
-msgstr "Couleur d'accentuation du système"
+msgstr "Couleur d'accentuation"
 
 msgid "Custom color"
 msgstr "Couleur personnalisée"
 
-msgid "Gradient"
-msgstr "Dégradé"
+msgid "Custom gradient"
+msgstr "Dégradé personnalisé"
 
 msgid "Color"
 msgstr "Couleur"
@@ -69,20 +126,38 @@ msgstr "Couleur de début"
 msgid "End color"
 msgstr "Couleur de fin"
 
-msgid "Sidebar Bookmark"
-msgstr "Signet"
+#——————————————————————————————
+# Preferences - Visibility
+#——————————————————————————————
 
-msgid "The \"Computer\" bookmark gives access to this panel from the sidebar. Restore it here if you accidentally removed it."
-msgstr "Le signet « Ordinateur » donne accès à ce panneau depuis les signets. Restaurez-le ici si vous l'avez supprimé par erreur."
+msgid "Visibility"
+msgstr "Visibilité"
 
-msgid "Restore \"Computer\" bookmark"
-msgstr "Restaurer le signet « Ordinateur »"
+msgid "Choose how each group appears. Visible: shows the group as a normal separated section. Merged: folds the group into the On this Computer group. Hidden: hides the group entirely."
+msgstr "Choisir comment chaque groupe s'affiche. Visible : affiche le groupe comme une section séparée normale. Fusionné : ajoute le groupe dans le groupe Sur cet ordinateur. Masqué : masque entièrement le groupe."
 
-msgid "Restore"
-msgstr "Restaurer"
+msgid "Visible"
+msgstr "Visible"
 
-msgid "Added ✓"
-msgstr "Ajouté ✓"
+msgid "Merged"
+msgstr "Fusionné"
+
+msgid "Hidden"
+msgstr "Masqué"
+
+#——————————————————————————————
+# Preferences - System
+#——————————————————————————————
+
+msgid "Show system partitions"
+msgstr "Afficher les partitions système"
+
+msgid "Include boot and EFI partitions in the System group"
+msgstr "Inclure les partitions boot et EFI dans le groupe Système"
+
+#——————————————————————————————
+# Preferences - About
+#——————————————————————————————
 
 msgid "About"
 msgstr "À propos"
@@ -102,44 +177,5 @@ msgstr "Licence"
 msgid "Source code"
 msgstr "Code source"
 
-msgid "GitHub ↗"
-msgstr "GitHub ↗"
-
-msgid "{free} free of {total}"
-msgstr "{free} disponible sur {total}"
-
-msgid "Computer"
-msgstr "Ordinateur"
-
-msgid "Mount"
-msgstr "Monter"
-
-msgid "Unmount"
-msgstr "Démonter"
-
-msgid "Eject"
-msgstr "Éjecter"
-
-msgid "Open"
-msgstr "Ouvrir"
-
-msgid "Open in New Tab"
-msgstr "Ouvrir dans un nouvel onglet"
-
-msgid "Open in New Window"
-msgstr "Ouvrir dans une nouvelle fenêtre"
-
-msgid "Properties"
-msgstr "Propriétés"
-
-msgid "Hide system partitions"
-msgstr "Masquer les partitions système"
-
-msgid "Hide boot and EFI drives"
-msgstr "Masquer les partitions de démarrage (Boot et EFI)"
-
-msgid "Open My Computer"
-msgstr "Ouvrir My Computer"
-
-msgid "On this computer"
-msgstr "Sur cet ordinateur"
+msgid "GitHub"
+msgstr "GitHub"

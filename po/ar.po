@@ -12,41 +12,98 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=6; plural=n==0 ? 0 : n==1 ? 1 : n==2 ? 2 : n%100>=3 && n%100<=10 ? 3 : n%100>=11 ? 4 : 5;\n"
 
-msgid "My Computer Settings"
-msgstr "إعدادات جهاز الكمبيوتر"
+#——————————————————————————————
+# Panel - Group labels
+#——————————————————————————————
+
+msgid "On this Computer"
+msgstr ""
 
 msgid "System"
 msgstr "النظام"
 
-msgid "Devices and Drives"
-msgstr "الأجهزة ومحركات الأقراص"
+msgid "Removable"
+msgstr ""
 
-msgid "Removable Devices"
-msgstr "الأجهزة القابلة للإزالة"
-
-msgid "Disc Images"
-msgstr "صور الأقراص"
+msgid "Disc"
+msgstr ""
 
 msgid "Network Volumes"
 msgstr "مجلدات الشبكة"
 
+#——————————————————————————————
+# Panel - Disk card
+#——————————————————————————————
+
+msgid "{free} free of {total}"
+msgstr "متوفر {free} من {total}"
+
 msgid "Not mounted"
 msgstr "غير موصول"
+
+#——————————————————————————————
+# Panel - Disk card actions
+#——————————————————————————————
+
+msgid "Open"
+msgstr "افتح"
+
+msgid "Open in New Tab"
+msgstr "افتح في علامة تبويب جديدة"
+
+msgid "Open in New Window"
+msgstr "افتح في نافذة جديدة"
+
+msgid "Mount"
+msgstr "ضم"
+
+msgid "Unmount"
+msgstr "فصل"
+
+msgid "Eject"
+msgstr "إخراج"
+
+msgid "Properties"
+msgstr "الخصائص"
 
 msgid "Format…"
 msgstr "تهيئة…"
 
+#——————————————————————————————
+# Sidebar
+#——————————————————————————————
+
+msgid "Computer"
+msgstr "جهاز الكمبيوتر"
+
+msgid "Open My Computer"
+msgstr "افتح جهاز الكمبيوتر"
+
+#——————————————————————————————
+# Preferences - General
+#——————————————————————————————
+
+msgid "My Computer Settings"
+msgstr "إعدادات جهاز الكمبيوتر"
+
 msgid "General"
 msgstr "عام"
 
-msgid "Start on Computer view"
-msgstr "البدء في عرض الكمبيوتر"
+msgid "Start on the Computer view"
+msgstr ""
 
-msgid "Show the disk panel when Nautilus opens"
-msgstr "إظهار لوحة الأقراص عند فتح ناوتيلوس"
+msgid "Launch directly to the Computer view instead of Home"
+msgstr ""
 
-msgid "Disk Usage Color"
-msgstr "لون استخدام القرص"
+#——————————————————————————————
+# Preferences - Bar Color
+#——————————————————————————————
+
+msgid "Bar Color"
+msgstr ""
+
+msgid "Select or customize the bar color."
+msgstr ""
 
 msgid "Color mode"
 msgstr "وضع اللون"
@@ -57,8 +114,8 @@ msgstr "لون النظام المميز"
 msgid "Custom color"
 msgstr "لون مخصص"
 
-msgid "Gradient"
-msgstr "تدرج لوني"
+msgid "Custom gradient"
+msgstr ""
 
 msgid "Color"
 msgstr "اللون"
@@ -69,20 +126,38 @@ msgstr "لون البداية"
 msgid "End color"
 msgstr "لون النهاية"
 
-msgid "Sidebar Bookmark"
-msgstr "علامة الشريط الجانبي"
+#——————————————————————————————
+# Preferences - Visibility
+#——————————————————————————————
 
-msgid "The \"Computer\" bookmark gives access to this panel from the sidebar. Restore it here if you accidentally removed it."
-msgstr "تتيح علامة \"جهاز الكمبيوتر\" إمكانية الوصول إلى هذه اللوحة من الشريط الجانبي. استعدها من هنا إذا قمت بإزالتها دون قصد."
+msgid "Visibility"
+msgstr ""
 
-msgid "Restore \"Computer\" bookmark"
-msgstr "استعادة علامة \"جهاز الكمبيوتر\""
+msgid "Choose how each group appears. Visible: shows the group as a normal separated section. Merged: folds the group into the On this Computer group. Hidden: hides the group entirely."
+msgstr ""
 
-msgid "Restore"
-msgstr "استعادة"
+msgid "Visible"
+msgstr ""
 
-msgid "Added ✓"
-msgstr "تمت الإضافة ✓"
+msgid "Merged"
+msgstr ""
+
+msgid "Hidden"
+msgstr ""
+
+#——————————————————————————————
+# Preferences - System
+#——————————————————————————————
+
+msgid "Show system partitions"
+msgstr ""
+
+msgid "Include boot and EFI partitions in the System group"
+msgstr ""
+
+#——————————————————————————————
+# Preferences - About
+#——————————————————————————————
 
 msgid "About"
 msgstr "حول"
@@ -102,44 +177,5 @@ msgstr "الترخيص"
 msgid "Source code"
 msgstr "شفرة المصدر"
 
-msgid "GitHub ↗"
-msgstr "جيت هاب ↗"
-
-msgid "{free} free of {total}"
-msgstr "متوفر {free} من {total}"
-
-msgid "Computer"
-msgstr "جهاز الكمبيوتر"
-
-msgid "Mount"
-msgstr "ضم"
-
-msgid "Unmount"
-msgstr "فصل"
-
-msgid "Eject"
-msgstr "إخراج"
-
-msgid "Open"
-msgstr "افتح"
-
-msgid "Open in New Tab"
-msgstr "افتح في علامة تبويب جديدة"
-
-msgid "Open in New Window"
-msgstr "افتح في نافذة جديدة"
-
-msgid "Properties"
-msgstr "الخصائص"
-
-msgid "Hide system partitions"
-msgstr "إخفاء أقسام النظام"
-
-msgid "Hide boot and EFI drives"
-msgstr "إخفاء أقسام الإقلاع و EFI"
-
-msgid "Open My Computer"
-msgstr "افتح جهاز الكمبيوتر"
-
-msgid "On this computer"
-msgstr "على هذا الكمبيوتر"
+msgid "GitHub"
+msgstr ""

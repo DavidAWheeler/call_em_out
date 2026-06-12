@@ -3,7 +3,7 @@ msgstr ""
 "Project-Id-Version: nautilus-my-computer\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-06-01 00:00+0200\n"
-"PO-Revision-Date: 2026-06-01 00:00+0200\n"
+"PO-Revision-Date: 2026-06-11 00:00+0200\n"
 "Last-Translator: Unai Lomas\n"
 "Language-Team: Spanish\n"
 "Language: es\n"
@@ -12,53 +12,110 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
 
-msgid "My Computer Settings"
-msgstr "Configuración de Equipo"
+#——————————————————————————————
+# Panel - Group labels
+#——————————————————————————————
+
+msgid "On this Computer"
+msgstr "En este equipo"
 
 msgid "System"
 msgstr "Sistema"
 
-msgid "Devices and Drives"
-msgstr "Dispositivos y unidades"
+msgid "Removable"
+msgstr "Extraíble"
 
-msgid "Removable Devices"
-msgstr "Dispositivos extraíbles"
-
-msgid "Disc Images"
-msgstr "Imágenes de disco"
+msgid "Disc"
+msgstr "Disco"
 
 msgid "Network Volumes"
 msgstr "Volúmenes de red"
 
+#——————————————————————————————
+# Panel - Disk card
+#——————————————————————————————
+
+msgid "{free} free of {total}"
+msgstr "{free} libre de {total}"
+
 msgid "Not mounted"
 msgstr "No montado"
+
+#——————————————————————————————
+# Panel - Disk card actions
+#——————————————————————————————
+
+msgid "Open"
+msgstr "Abrir"
+
+msgid "Open in New Tab"
+msgstr "Abrir en una pestaña nueva"
+
+msgid "Open in New Window"
+msgstr "Abrir en una ventana nueva"
+
+msgid "Mount"
+msgstr "Montar"
+
+msgid "Unmount"
+msgstr "Desmontar"
+
+msgid "Eject"
+msgstr "Expulsar"
+
+msgid "Properties"
+msgstr "Propiedades"
 
 msgid "Format…"
 msgstr "Formatear…"
 
+#——————————————————————————————
+# Sidebar
+#——————————————————————————————
+
+msgid "Computer"
+msgstr "Equipo"
+
+msgid "Open My Computer"
+msgstr "Abrir Equipo"
+
+#——————————————————————————————
+# Preferences - General
+#——————————————————————————————
+
+msgid "My Computer Settings"
+msgstr "Configuración de Equipo"
+
 msgid "General"
 msgstr "General"
 
-msgid "Start on Computer view"
+msgid "Start on the Computer view"
 msgstr "Iniciar en la vista Equipo"
 
-msgid "Show the disk panel when Nautilus opens"
-msgstr "Mostrar el panel de discos al abrir Nautilus"
+msgid "Launch directly to the Computer view instead of Home"
+msgstr "Lanzar directamente a la vista Equipo en vez de Carpeta personnal"
 
-msgid "Disk Usage Color"
-msgstr "Color de uso del disco"
+#——————————————————————————————
+# Preferences - Bar Color
+#——————————————————————————————
+
+msgid "Bar Color"
+msgstr "Color de la barra"
+
+msgid "Select or customize the bar color."
+msgstr "Selecciona o personaliza el color de la barra."
 
 msgid "Color mode"
 msgstr "Modo de color"
 
 msgid "System accent"
-msgstr "Color de acento del sistema"
+msgstr "Color de resaltado"
 
 msgid "Custom color"
 msgstr "Color personalizado"
 
-msgid "Gradient"
-msgstr "Degradado"
+msgid "Custom gradient"
+msgstr "Degradado personalizado"
 
 msgid "Color"
 msgstr "Color"
@@ -69,20 +126,38 @@ msgstr "Color inicial"
 msgid "End color"
 msgstr "Color final"
 
-msgid "Sidebar Bookmark"
-msgstr "Marcador de la barra lateral"
+#——————————————————————————————
+# Preferences - Visibility
+#——————————————————————————————
 
-msgid "The \"Computer\" bookmark gives access to this panel from the sidebar. Restore it here if you accidentally removed it."
-msgstr "El marcador \"Equipo\" da acceso a este panel desde la barra lateral. Restáurelo aquí si lo ha eliminado accidentalmente."
+msgid "Visibility"
+msgstr "Visibilidad"
 
-msgid "Restore \"Computer\" bookmark"
-msgstr "Restaurar marcador \"Equipo\""
+msgid "Choose how each group appears. Visible: shows the group as a normal separated section. Merged: folds the group into the On this Computer group. Hidden: hides the group entirely."
+msgstr "Elige cómo aparece cada grupo. Visible: muestra el grupo como una sección separada normal. Fusionado: agrupa las entradas en el grupo En este equipo. Oculto: oculta el grupo por completo."
 
-msgid "Restore"
-msgstr "Restaurar"
+msgid "Visible"
+msgstr "Visible"
 
-msgid "Added ✓"
-msgstr "Añadido ✓"
+msgid "Merged"
+msgstr "Fusionado"
+
+msgid "Hidden"
+msgstr "Oculto"
+
+#——————————————————————————————
+# Preferences - System
+#——————————————————————————————
+
+msgid "Show system partitions"
+msgstr "Mostrar particiones del sistema"
+
+msgid "Include boot and EFI partitions in the System group"
+msgstr "Incluir las particiones de arranque y EFI en el grupo Sistema"
+
+#——————————————————————————————
+# Preferences - About
+#——————————————————————————————
 
 msgid "About"
 msgstr "Acerca de"
@@ -102,44 +177,5 @@ msgstr "Licencia"
 msgid "Source code"
 msgstr "Código fuente"
 
-msgid "GitHub ↗"
-msgstr "GitHub ↗"
-
-msgid "{free} free of {total}"
-msgstr "{free} libre de {total}"
-
-msgid "Computer"
-msgstr "Equipo"
-
-msgid "Mount"
-msgstr "Montar"
-
-msgid "Unmount"
-msgstr "Desmontar"
-
-msgid "Eject"
-msgstr "Expulsar"
-
-msgid "Open"
-msgstr "Abrir"
-
-msgid "Open in New Tab"
-msgstr "Abrir en una pestaña nueva"
-
-msgid "Open in New Window"
-msgstr "Abrir en una ventana nueva"
-
-msgid "Properties"
-msgstr "Propiedades"
-
-msgid "Hide system partitions"
-msgstr "Ocultar particiones del sistema"
-
-msgid "Hide boot and EFI drives"
-msgstr "Ocultar unidades de arranque (Boot y EFI)"
-
-msgid "Open My Computer"
-msgstr "Abrir Equipo"
-
-msgid "On this computer"
-msgstr "En este equipo"
+msgid "GitHub"
+msgstr "GitHub"

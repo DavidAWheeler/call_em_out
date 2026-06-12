@@ -56,13 +56,13 @@
       <description>Hex color used when color-mode is flat</description>
     </key>
 
-    <key name="gradient-color-1" type="s">
+    <key name="custom-gradient-color-1" type="s">
       <default>'#59A6FF'</default>
       <summary>Gradient start color</summary>
       <description>Left color (stop 20%) used when color-mode is gradient</description>
     </key>
 
-    <key name="gradient-color-2" type="s">
+    <key name="custom-gradient-color-2" type="s">
       <default>'#D574C1'</default>
       <summary>Gradient end color</summary>
       <description>Right color (stop 100%) used when color-mode is gradient</description>

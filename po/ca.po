@@ -12,41 +12,98 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
 
-msgid "My Computer Settings"
-msgstr "Configuració d'Ordinador"
+#——————————————————————————————
+# Panel - Group labels
+#——————————————————————————————
+
+msgid "On this Computer"
+msgstr ""
 
 msgid "System"
 msgstr "Sistema"
 
-msgid "Devices and Drives"
-msgstr "Dispositius i unitats"
+msgid "Removable"
+msgstr ""
 
-msgid "Removable Devices"
-msgstr "Dispositius extraïbles"
-
-msgid "Disc Images"
-msgstr "Imatges de disc"
+msgid "Disc"
+msgstr ""
 
 msgid "Network Volumes"
 msgstr "Volums de xarxa"
 
+#——————————————————————————————
+# Panel - Disk card
+#——————————————————————————————
+
+msgid "{free} free of {total}"
+msgstr "{free} lliure de {total}"
+
 msgid "Not mounted"
 msgstr "No muntat"
+
+#——————————————————————————————
+# Panel - Disk card actions
+#——————————————————————————————
+
+msgid "Open"
+msgstr "Obrir"
+
+msgid "Open in New Tab"
+msgstr "Obrir en una pestanya nova"
+
+msgid "Open in New Window"
+msgstr "Obrir en una finestra nova"
+
+msgid "Mount"
+msgstr "Muntar"
+
+msgid "Unmount"
+msgstr "Desmuntar"
+
+msgid "Eject"
+msgstr "Expulsar"
+
+msgid "Properties"
+msgstr "Propietats"
 
 msgid "Format…"
 msgstr "Formatar…"
 
+#——————————————————————————————
+# Sidebar
+#——————————————————————————————
+
+msgid "Computer"
+msgstr "Ordinador"
+
+msgid "Open My Computer"
+msgstr "Obrir Ordinador"
+
+#——————————————————————————————
+# Preferences - General
+#——————————————————————————————
+
+msgid "My Computer Settings"
+msgstr "Configuració d'Ordinador"
+
 msgid "General"
 msgstr "General"
 
-msgid "Start on Computer view"
-msgstr "Iniciar a la vista Ordinador"
+msgid "Start on the Computer view"
+msgstr ""
 
-msgid "Show the disk panel when Nautilus opens"
-msgstr "Mostra el panell de discos en obrir Nautilus"
+msgid "Launch directly to the Computer view instead of Home"
+msgstr ""
 
-msgid "Disk Usage Color"
-msgstr "Color d'ús del disc"
+#——————————————————————————————
+# Preferences - Bar Color
+#——————————————————————————————
+
+msgid "Bar Color"
+msgstr ""
+
+msgid "Select or customize the bar color."
+msgstr ""
 
 msgid "Color mode"
 msgstr "Mode de color"
@@ -57,8 +114,8 @@ msgstr "Color d'accent del sistema"
 msgid "Custom color"
 msgstr "Color personalitzat"
 
-msgid "Gradient"
-msgstr "Degradat"
+msgid "Custom gradient"
+msgstr ""
 
 msgid "Color"
 msgstr "Color"
@@ -69,20 +126,38 @@ msgstr "Color inicial"
 msgid "End color"
 msgstr "Color final"
 
-msgid "Sidebar Bookmark"
-msgstr "Marcador de la barra lateral"
+#——————————————————————————————
+# Preferences - Visibility
+#——————————————————————————————
 
-msgid "The \"Computer\" bookmark gives access to this panel from the sidebar. Restore it here if you accidentally removed it."
-msgstr "El marcador \"Ordinador\" dóna accés a aquest panell des de la barra lateral. Restaureu-lo aquí si l'heu eliminat accidentalment."
+msgid "Visibility"
+msgstr ""
 
-msgid "Restore \"Computer\" bookmark"
-msgstr "Restaurar marcador \"Ordinador\""
+msgid "Choose how each group appears. Visible: shows the group as a normal separated section. Merged: folds the group into the On this Computer group. Hidden: hides the group entirely."
+msgstr ""
 
-msgid "Restore"
-msgstr "Restaurar"
+msgid "Visible"
+msgstr ""
 
-msgid "Added ✓"
-msgstr "Afegit ✓"
+msgid "Merged"
+msgstr ""
+
+msgid "Hidden"
+msgstr ""
+
+#——————————————————————————————
+# Preferences - System
+#——————————————————————————————
+
+msgid "Show system partitions"
+msgstr ""
+
+msgid "Include boot and EFI partitions in the System group"
+msgstr ""
+
+#——————————————————————————————
+# Preferences - About
+#——————————————————————————————
 
 msgid "About"
 msgstr "Quant a"
@@ -102,44 +177,5 @@ msgstr "Llicència"
 msgid "Source code"
 msgstr "Codi font"
 
-msgid "GitHub ↗"
-msgstr "GitHub ↗"
-
-msgid "{free} free of {total}"
-msgstr "{free} lliure de {total}"
-
-msgid "Computer"
-msgstr "Ordinador"
-
-msgid "Mount"
-msgstr "Muntar"
-
-msgid "Unmount"
-msgstr "Desmuntar"
-
-msgid "Eject"
-msgstr "Expulsar"
-
-msgid "Open"
-msgstr "Obrir"
-
-msgid "Open in New Tab"
-msgstr "Obrir en una pestanya nova"
-
-msgid "Open in New Window"
-msgstr "Obrir en una finestra nova"
-
-msgid "Properties"
-msgstr "Propietats"
-
-msgid "Hide system partitions"
-msgstr "Ocultar particions del sistema"
-
-msgid "Hide boot and EFI drives"
-msgstr "Ocultar unitats d'arrencada (Boot i EFI)"
-
-msgid "Open My Computer"
-msgstr "Obrir Ordinador"
-
-msgid "On this computer"
-msgstr "En aquest ordinador"
+msgid "GitHub"
+msgstr ""

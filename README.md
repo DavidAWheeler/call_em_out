@@ -38,11 +38,36 @@ Computer sits at the top of the GNOME Files sidebar, click to open the panel and
 
 ### Settings page
 
-My Computer Settings let you open GNOME Files directly on the Computer view at startup, and customize the disk usage bar color to match your style.
+My Computer Settings let you:
+
+- Open GNOME Files directly on the Computer view at startup
+- Show or hide system partitions (root, boot, EFI, swap)
+- Control the visibility of each group - visible, hidden, or merged into On this Computer
+- Customize the disk usage bar color to match your style
 
 ![Settings Page](assets/images/settings-page.png)
 
 > Settings are stored via GSettings under `io.github.yannmasoch.nautilus-my-computer` and persist across sessions.
+
+## Groups visibility
+
+My Computer organises your storage into five groups:
+
+- **System** - root, boot, EFI, and swap partitions
+- **On this Computer** - your internal drives and partitions
+- **Removable** - USB drives, phones, cameras, and removable media
+- **Disc** - optical drives and mounted ISO images
+- **Network** - network shares and remote filesystems
+
+Each group (except **On this Computer**) has three visibility settings, configurable from the right-click menu on the Computer button:
+
+- **Visible** - shown as its own labelled section
+- **Hidden** - removed from the panel entirely
+- **Merged** - folded into **On this Computer**, keeping everything in one flat list
+
+Make the **My Computer** view your own, and organize it to show only what matters to you.
+
+![Groups Visibility](assets/images/groups-visibility.png)
 
 ## Style
 
@@ -76,6 +101,7 @@ All icons are native GNOME icons. My Computer works with any custom icon theme.
 - **Customizable bars:** choose between GNOME accent color, a custom color, or a custom gradient for the usage bars.
 - **Start on My Computer:** choose to open GNOME Files directly on the My Computer panel every time.
 - **Right-click context menu:** open, open in new tab, open in new window, mount, unmount, and eject volumes directly from a native-feel context menu.
+- **Groups visibility:** choose which storage groups are visible, hidden, or merged into one flat list - directly from the right-click menu on the Computer button.
   
 ## Tested on
 

@@ -17,16 +17,16 @@ msgstr ""
 #——————————————————————————————
 
 msgid "On this Computer"
-msgstr ""
+msgstr "على هذا الكمبيوتر"
 
 msgid "System"
 msgstr "النظام"
 
 msgid "Removable"
-msgstr ""
+msgstr "قابلة للإزالة"
 
 msgid "Disc"
-msgstr ""
+msgstr "قرص"
 
 msgid "Network Volumes"
 msgstr "مجلدات الشبكة"
@@ -90,20 +90,20 @@ msgid "General"
 msgstr "عام"
 
 msgid "Start on the Computer view"
-msgstr ""
+msgstr "البدء في عرض الكمبيوتر"
 
 msgid "Launch directly to the Computer view instead of Home"
-msgstr ""
+msgstr "الفتح مباشرة على عرض الكمبيوتر بدلاً من المجلد الرئيسي"
 
 #——————————————————————————————
 # Preferences - Bar Color
 #——————————————————————————————
 
 msgid "Bar Color"
-msgstr ""
+msgstr "لون الشريط"
 
 msgid "Select or customize the bar color."
-msgstr ""
+msgstr "اختر لون الشريط أو قم بتخصيصه."
 
 msgid "Color mode"
 msgstr "وضع اللون"
@@ -115,7 +115,7 @@ msgid "Custom color"
 msgstr "لون مخصص"
 
 msgid "Custom gradient"
-msgstr ""
+msgstr "تدرج مخصص"
 
 msgid "Color"
 msgstr "اللون"
@@ -131,29 +131,29 @@ msgstr "لون النهاية"
 #——————————————————————————————
 
 msgid "Visibility"
-msgstr ""
+msgstr "الظهور"
 
 msgid "Choose how each group appears. Visible: shows the group as a normal separated section. Merged: folds the group into the On this Computer group. Hidden: hides the group entirely."
-msgstr ""
+msgstr "اختر كيفية ظهور كل مجموعة. ظاهر: يظهر المجموعة كقسم منفصل عادي. مدمج: يطوي المجموعة ضمن مجموعة \"على هذا الكمبيوتر\". مخفي: يخفي المجموعة تماماً."
 
 msgid "Visible"
-msgstr ""
+msgstr "ظاهر"
 
 msgid "Merged"
-msgstr ""
+msgstr "مدمج"
 
 msgid "Hidden"
-msgstr ""
+msgstr "مخفي"
 
 #——————————————————————————————
 # Preferences - System
 #——————————————————————————————
 
 msgid "Show system partitions"
-msgstr ""
+msgstr "إظهار أقسام النظام"
 
 msgid "Include boot and EFI partitions in the System group"
-msgstr ""
+msgstr "تضمين أقسام الإقلاع و EFI في مجموعة النظام"
 
 #——————————————————————————————
 # Preferences - About
@@ -178,4 +178,4 @@ msgid "Source code"
 msgstr "شفرة المصدر"
 
 msgid "GitHub"
-msgstr ""
+msgstr "جيت هاب"

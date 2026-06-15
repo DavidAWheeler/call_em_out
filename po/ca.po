@@ -17,16 +17,16 @@ msgstr ""
 #——————————————————————————————
 
 msgid "On this Computer"
-msgstr ""
+msgstr "En aquest ordinador"
 
 msgid "System"
 msgstr "Sistema"
 
 msgid "Removable"
-msgstr ""
+msgstr "Extraïble"
 
 msgid "Disc"
-msgstr ""
+msgstr "Disc"
 
 msgid "Network Volumes"
 msgstr "Volums de xarxa"
@@ -90,20 +90,20 @@ msgid "General"
 msgstr "General"
 
 msgid "Start on the Computer view"
-msgstr ""
+msgstr "Inicia a la vista Ordinador"
 
 msgid "Launch directly to the Computer view instead of Home"
-msgstr ""
+msgstr "Obre directament la vista Ordinador en lloc de l'Inici"
 
 #——————————————————————————————
 # Preferences - Bar Color
 #——————————————————————————————
 
 msgid "Bar Color"
-msgstr ""
+msgstr "Color de la barra"
 
 msgid "Select or customize the bar color."
-msgstr ""
+msgstr "Seleccioneu o personalitzeu el color de la barra."
 
 msgid "Color mode"
 msgstr "Mode de color"
@@ -115,7 +115,7 @@ msgid "Custom color"
 msgstr "Color personalitzat"
 
 msgid "Custom gradient"
-msgstr ""
+msgstr "Degradat personalitzat"
 
 msgid "Color"
 msgstr "Color"
@@ -131,29 +131,29 @@ msgstr "Color final"
 #——————————————————————————————
 
 msgid "Visibility"
-msgstr ""
+msgstr "Visibilitat"
 
 msgid "Choose how each group appears. Visible: shows the group as a normal separated section. Merged: folds the group into the On this Computer group. Hidden: hides the group entirely."
-msgstr ""
+msgstr "Trieu com apareix cada grup. Visible: mostra el grup com una secció separada normal. Integrat: integra el grup dins del grup En aquest ordinador. Ocult: amaga completament el grup."
 
 msgid "Visible"
-msgstr ""
+msgstr "Visible"
 
 msgid "Merged"
-msgstr ""
+msgstr "Integrat"
 
 msgid "Hidden"
-msgstr ""
+msgstr "Ocult"
 
 #——————————————————————————————
 # Preferences - System
 #——————————————————————————————
 
 msgid "Show system partitions"
-msgstr ""
+msgstr "Mostra les particions del sistema"
 
 msgid "Include boot and EFI partitions in the System group"
-msgstr ""
+msgstr "Inclou les particions d'arrencada i EFI al grup Sistema"
 
 #——————————————————————————————
 # Preferences - About
@@ -178,4 +178,4 @@ msgid "Source code"
 msgstr "Codi font"
 
 msgid "GitHub"
-msgstr ""
+msgstr "GitHub"

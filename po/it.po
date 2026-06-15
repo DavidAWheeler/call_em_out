@@ -17,16 +17,16 @@ msgstr ""
 #——————————————————————————————
 
 msgid "On this Computer"
-msgstr ""
+msgstr "In questo computer"
 
 msgid "System"
 msgstr "Sistema"
 
 msgid "Removable"
-msgstr ""
+msgstr "Rimovibile"
 
 msgid "Disc"
-msgstr ""
+msgstr "Disco"
 
 msgid "Network Volumes"
 msgstr "Volumi di rete"
@@ -90,20 +90,20 @@ msgid "General"
 msgstr "Generale"
 
 msgid "Start on the Computer view"
-msgstr ""
+msgstr "Avvia nella vista Computer"
 
 msgid "Launch directly to the Computer view instead of Home"
-msgstr ""
+msgstr "Apri direttamente la vista Computer invece di Home"
 
 #——————————————————————————————
 # Preferences - Bar Color
 #——————————————————————————————
 
 msgid "Bar Color"
-msgstr ""
+msgstr "Colore della barra"
 
 msgid "Select or customize the bar color."
-msgstr ""
+msgstr "Seleziona o personalizza il colore della barra."
 
 msgid "Color mode"
 msgstr "Modalità colore"
@@ -115,7 +115,7 @@ msgid "Custom color"
 msgstr "Colore personalizzato"
 
 msgid "Custom gradient"
-msgstr ""
+msgstr "Gradiente personalizzato"
 
 msgid "Color"
 msgstr "Colore"
@@ -131,29 +131,29 @@ msgstr "Colore finale"
 #——————————————————————————————
 
 msgid "Visibility"
-msgstr ""
+msgstr "Visibilità"
 
 msgid "Choose how each group appears. Visible: shows the group as a normal separated section. Merged: folds the group into the On this Computer group. Hidden: hides the group entirely."
-msgstr ""
+msgstr "Scegli come appare ogni gruppo. Visibile: mostra il gruppo come una normale sezione separata. Integrato: unisce il gruppo al gruppo In questo computer. Nascosto: nasconde completamente il gruppo."
 
 msgid "Visible"
-msgstr ""
+msgstr "Visibile"
 
 msgid "Merged"
-msgstr ""
+msgstr "Integrato"
 
 msgid "Hidden"
-msgstr ""
+msgstr "Nascosto"
 
 #——————————————————————————————
 # Preferences - System
 #——————————————————————————————
 
 msgid "Show system partitions"
-msgstr ""
+msgstr "Mostra le partizioni di sistema"
 
 msgid "Include boot and EFI partitions in the System group"
-msgstr ""
+msgstr "Includi le partizioni di avvio ed EFI nel gruppo Sistema"
 
 #——————————————————————————————
 # Preferences - About
@@ -178,4 +178,4 @@ msgid "Source code"
 msgstr "Codice sorgente"
 
 msgid "GitHub"
-msgstr ""
+msgstr "GitHub"

@@ -17,16 +17,16 @@ msgstr ""
 #——————————————————————————————
 
 msgid "On this Computer"
-msgstr ""
+msgstr "Neste computador"
 
 msgid "System"
 msgstr "Sistema"
 
 msgid "Removable"
-msgstr ""
+msgstr "Removível"
 
 msgid "Disc"
-msgstr ""
+msgstr "Disco"
 
 msgid "Network Volumes"
 msgstr "Volumes de Rede"
@@ -90,20 +90,20 @@ msgid "General"
 msgstr "Geral"
 
 msgid "Start on the Computer view"
-msgstr ""
+msgstr "Iniciar na vista Computador"
 
 msgid "Launch directly to the Computer view instead of Home"
-msgstr ""
+msgstr "Abrir diretamente na vista Computador em vez de Início"
 
 #——————————————————————————————
 # Preferences - Bar Color
 #——————————————————————————————
 
 msgid "Bar Color"
-msgstr ""
+msgstr "Cor da barra"
 
 msgid "Select or customize the bar color."
-msgstr ""
+msgstr "Selecione ou personalize a cor da barra."
 
 msgid "Color mode"
 msgstr "Modo de cor"
@@ -115,7 +115,7 @@ msgid "Custom color"
 msgstr "Cor personalizada"
 
 msgid "Custom gradient"
-msgstr ""
+msgstr "Gradiente personalizado"
 
 msgid "Color"
 msgstr "Cor"
@@ -131,29 +131,29 @@ msgstr "Cor final"
 #——————————————————————————————
 
 msgid "Visibility"
-msgstr ""
+msgstr "Visibilidade"
 
 msgid "Choose how each group appears. Visible: shows the group as a normal separated section. Merged: folds the group into the On this Computer group. Hidden: hides the group entirely."
-msgstr ""
+msgstr "Escolha como cada grupo aparece. Visível: mostra o grupo como uma secção separada normal. Integrado: integra o grupo no grupo Neste computador. Oculto: esconde o grupo completamente."
 
 msgid "Visible"
-msgstr ""
+msgstr "Visível"
 
 msgid "Merged"
-msgstr ""
+msgstr "Integrado"
 
 msgid "Hidden"
-msgstr ""
+msgstr "Oculto"
 
 #——————————————————————————————
 # Preferences - System
 #——————————————————————————————
 
 msgid "Show system partitions"
-msgstr ""
+msgstr "Mostrar partições do sistema"
 
 msgid "Include boot and EFI partitions in the System group"
-msgstr ""
+msgstr "Incluir as partições de arranque e EFI no grupo Sistema"
 
 #——————————————————————————————
 # Preferences - About
@@ -178,4 +178,4 @@ msgid "Source code"
 msgstr "Código-fonte"
 
 msgid "GitHub"
-msgstr ""
+msgstr "GitHub"

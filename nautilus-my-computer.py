@@ -65,7 +65,7 @@ DEBUG_SELFTEST = _flag("MC_SELFTEST", default=False)  # in-process navigation se
 
 # ── Extension metadata (keep in sync with pyproject.toml) ────────────────────
 EXT_NAME = "My Computer for Nautilus"
-EXT_VERSION = "0.5.4"
+EXT_VERSION = "0.6.0"
 EXT_AUTHOR = "Yann Masoch"
 EXT_LICENSE = "MIT"
 EXT_GITHUB = "https://github.com/yannmasoch/nautilus-my-computer"
@@ -386,7 +386,6 @@ _CSS = b"""
     --diskinfo-selection-grey: #959595;
 }
 .diskinfo-panel {
-    background-color: @view_bg_color;
 }
 .diskinfo-panel flowbox {
     --accent-bg-color: var(--diskinfo-selection-grey);
@@ -1755,6 +1754,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         panel.set_hexpand(True)
         panel.set_vexpand(True)
         panel.get_style_context().add_class("diskinfo-panel")
+        panel.add_css_class("nautilus-grid-view")
 
         scroll = Gtk.ScrolledWindow()
         scroll.set_vexpand(True)

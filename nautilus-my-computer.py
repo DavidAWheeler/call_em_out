@@ -59,6 +59,7 @@ def _flag(name: str, default: bool = True) -> bool:
 
 DEBUG_MAIN_VIEW_ACTIVE = _flag("MC_MAIN_VIEW")  # main view: panel overlay over the file view
 DEBUG_COMPUTER_BUTTON_ACTIVE = _flag("MC_COMPUTER_BUTTON")  # left sidebar: "Computer" row injection
+DEBUG_NATIVE_SIDEBAR_ACTIVE = _flag("MC_NATIVE_SIDEBAR", default=False)  # opt-in native list test
 DEBUG_PATHBAR_ACTIVE = _flag("MC_PATHBAR")  # top URL bar: chip icon pinning
 DEBUG_SORT_WATCH_ACTIVE = _flag("MC_SORT_WATCH")  # top view-mode/sort buttons: sort metadata watch
 DEBUG_SELFTEST = _flag("MC_SELFTEST", default=False)  # in-process navigation self-test driver
@@ -404,26 +405,14 @@ _CSS = b"""
     margin: 0;
     padding: 0;
 }
-/* Zero margin/padding on both listboxes so there is no gap between our
-   injected Computer row and the native sidebar list. */
+/* The Computer row stays in its own ListBox so Nautilus' runtime sidebar rebuilds
+   cannot clear it. Keep the theme's native .navigation-sidebar row styling and
+   only collapse the join between this one-row list and Nautilus' real list. */
 #my_computer_list {
-    margin: 6px 0 0 0;
-    padding: 0;
-}
-/* libadwaita: `placessidebar .navigation-sidebar > row > revealer { padding: 0 14px }`.
-   Our listbox is NOT inside placessidebar so that rule never fires.
-   Our fallback row has no revealer, so replicate the inset on the row. */
-#my_computer_list > row {
-    padding: 0 14px;
-}
-/* Fallback row only (row > box > image, not row > revealer > box > image).
-   Mirrors nautilus-sidebar-row.blp Image { margin-end: 8 }. */
-#my_computer_list > row > box > image {
-    margin-end: 8px;
+    padding-bottom: 0;
 }
 .places-sidebar-list {
-    margin: 0;
-    padding: 0;
+    padding-top: 0;
 }
 """
 
@@ -1420,6 +1409,11 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         # Re-discover network places in background; callback will repopulate
         _refresh_network_places(on_done=self._repopulate_visible)
         self._repopulate_visible()
+        for win, state in list(self._windows.items()):
+            if state.get("sidebar_native"):
+                self._schedule_native_sidebar_ensure(win)
+                self._schedule_native_sidebar_ensure(win, 300)
+                self._schedule_native_sidebar_ensure(win, 1000)
         return GLib.SOURCE_REMOVE
 
     def _repopulate_visible(self) -> bool:
@@ -2067,6 +2061,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         current_title = win.get_title() or ""
         in_view = _LOCATION_TITLE in current_title
 
+        self._schedule_native_sidebar_ensure(win)
+
         # A transient/empty title ("Loading…") means the window hasn't resolved
         # its location yet. Never act on it: it must not consume the one-shot
         # start-on-computer flag, nor flip the overlay to the file view.
@@ -2128,7 +2124,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                 state["_deselecting"] = False
                 state["selected_key"] = None
             sidebar_lb = state.get("sidebar_listbox")
-            if sidebar_lb:
+            if sidebar_lb and not state.get("sidebar_native"):
                 GLib.idle_add(lambda lb=sidebar_lb: lb.unselect_all() or False)
             if not self._set_visible_view(state, VIEW_FILES, "title changed show files"):
                 return
@@ -2837,40 +2833,16 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
     # ── Chrome icon fix (path bar chip) ─────────────────────────────────────
 
-    def _inject_sidebar_link(self, win: Gtk.Window) -> bool:
-        """Prototype: inject a dummy 'My Computer' row above NautilusSidebar.
+    def _find_sidebar_listbox(self, nautilus_sidebar) -> Gtk.ListBox | None:
+        for w in _all_widgets(nautilus_sidebar):
+            if isinstance(w, Gtk.ListBox):
+                return w
+        return None
 
-        Wraps NautilusSidebar in a vertical GtkBox (our_row + NautilusSidebar) and
-        sets that as the AdwToolbarView content. Our row is a direct sibling of
-        NautilusSidebar, outside the GtkListBox that update_places() clears.
-        One-time injection per window; no re-injection needed.
-        """
-        split_view = next(
-            (w for w in _all_widgets(win) if isinstance(w, Adw.OverlaySplitView)), None
-        )
-        sidebar_toolbar = split_view.get_sidebar() if split_view else None
-        if not isinstance(sidebar_toolbar, Adw.ToolbarView):
-            _log(
-                f"_inject_sidebar_link: expected AdwToolbarView from get_sidebar(), "
-                f"got {type(sidebar_toolbar).__name__ if sidebar_toolbar else 'None'}"
-            )
-            return False
-
-        nautilus_sidebar = sidebar_toolbar.get_content()
-        if nautilus_sidebar is None:
-            _log("_inject_sidebar_link: AdwToolbarView content is None")
-            return False
-
-        _log(f"_inject_sidebar_link: content={type(nautilus_sidebar).__name__}")
-
+    def _build_computer_sidebar_row(self, win: Gtk.Window) -> Gtk.ListBoxRow:
         # Try to instantiate NautilusSidebarRow directly from the Nautilus GObject
         # type system. It is registered at runtime when Nautilus loads, so
         # GObject.type_from_name() can find it. uri is construct-only.
-        our_listbox = Gtk.ListBox()
-        our_listbox.set_name("my_computer_list")
-        our_listbox.add_css_class("navigation-sidebar")
-        our_listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
-
         list_row = None
         try:
             row_gtype = GObject.type_from_name("NautilusSidebarRow")
@@ -2887,23 +2859,22 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             list_row.set_property("eject-tooltip", _("Unmount"))
             list_row.set_has_tooltip(True)
             list_row.set_tooltip_text(_("Open My Computer"))
-            _log(f"_inject_sidebar_link: NautilusSidebarRow created ✓ (uri={DISKS_URI})")
+            _log(f"_inject_sidebar_link: NautilusSidebarRow created (uri={DISKS_URI})")
         except Exception as e:
             _log(f"_inject_sidebar_link: NautilusSidebarRow unavailable ({e}), using GtkListBoxRow")
 
         if list_row is None:
             list_row = Gtk.ListBoxRow()
             list_row.set_name("my_computer")
-            # No revealer: box is a direct child of row so CSS `row > box` works.
-            # libadwaita's rule targets `row > revealer`; we replicate the inset
-            # via `#my_computer_list > row { padding: 0 14px }` in _CSS instead.
-            row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+            row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
             row_box.set_name("my_computer_box")
             icon = Gtk.Image.new_from_icon_name(COMPUTER_ICON)
             icon.set_name("my_computer_icon")
+            icon.add_css_class("sidebar-icon")
             icon.set_icon_size(Gtk.IconSize.NORMAL)
             label = Gtk.Label(label=_LOCATION_TITLE)
             label.set_name("my_computer_label")
+            label.add_css_class("sidebar-label")
             label.set_xalign(0.0)
             label.set_hexpand(True)
             label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
@@ -2911,11 +2882,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             row_box.append(label)
             list_row.set_child(row_box)
 
-        our_listbox.append(list_row)
-        our_listbox.connect(
-            "row-activated",
-            lambda _lb, _row: self._navigate_to(DISKS_URI, win),
-        )
+        list_row.add_css_class("activatable")
 
         def _pin_row_icon():
             for w in _all_widgets(list_row):
@@ -2983,12 +2950,136 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         right_click = Gtk.GestureClick()
         right_click.set_button(3)
         right_click.connect("pressed", _on_computer_right_clicked)
-        our_listbox.add_controller(right_click)
+        list_row.add_controller(right_click)
 
-        # Hide the eject button — not applicable for the Computer entry.
+        # Hide the eject button - not applicable for the Computer entry.
         btn = _find_widget(list_row, buildable_id="eject_button")
         if isinstance(btn, Gtk.Button):
             btn.set_visible(False)
+
+        return list_row
+
+    def _row_is_inside_listbox(self, row: Gtk.Widget, listbox: Gtk.ListBox) -> bool:
+        parent = row.get_parent()
+        while parent is not None:
+            if parent is listbox:
+                return True
+            parent = parent.get_parent()
+        return False
+
+    def _inject_native_sidebar_link(
+        self,
+        win: Gtk.Window,
+        nautilus_sidebar: Gtk.Widget,
+        native_listbox: Gtk.ListBox,
+        list_row: Gtk.ListBoxRow,
+    ) -> bool:
+        def _on_row_activated(_listbox, row):
+            if row is list_row:
+                self._navigate_to(DISKS_URI, win)
+
+        native_listbox.connect("row-activated", _on_row_activated)
+
+        state = self._windows.get(win)
+        if state is not None:
+            state["sidebar_listbox"] = native_listbox
+            state["sidebar_row"] = list_row
+            state["sidebar_native"] = True
+            state["sidebar_native_widget"] = nautilus_sidebar
+
+        self._ensure_native_sidebar_row(win)
+        return True
+
+    def _ensure_native_sidebar_row(self, win: Gtk.Window) -> bool:
+        state = self._windows.get(win)
+        if state is None or not state.get("sidebar_native"):
+            return GLib.SOURCE_REMOVE
+
+        nautilus_sidebar = state.get("sidebar_native_widget")
+        list_row = state.get("sidebar_row")
+        if nautilus_sidebar is None or list_row is None:
+            return GLib.SOURCE_REMOVE
+
+        native_listbox = self._find_sidebar_listbox(nautilus_sidebar)
+        if native_listbox is None:
+            return GLib.SOURCE_REMOVE
+
+        state["sidebar_listbox"] = native_listbox
+        state["sidebar_ensure_id"] = None
+        if self._row_is_inside_listbox(list_row, native_listbox):
+            return GLib.SOURCE_REMOVE
+
+        try:
+            native_listbox.insert(list_row, 0)
+            _log("_ensure_native_sidebar_row: Computer row inserted into native list")
+        except Exception as e:
+            _log(f"_ensure_native_sidebar_row: native insert failed ({e})")
+        return GLib.SOURCE_REMOVE
+
+    def _schedule_native_sidebar_ensure(self, win: Gtk.Window, delay_ms: int = 0) -> None:
+        state = self._windows.get(win)
+        if state is None or not state.get("sidebar_native"):
+            return
+        if delay_ms <= 0:
+            if state.get("sidebar_ensure_id") is not None:
+                return
+            state["sidebar_ensure_id"] = GLib.idle_add(
+                self._ensure_native_sidebar_row,
+                win,
+                priority=GLib.PRIORITY_LOW,
+            )
+        else:
+            GLib.timeout_add(delay_ms, self._ensure_native_sidebar_row, win)
+
+    def _inject_sidebar_link(self, win: Gtk.Window) -> bool:
+        """Prototype: inject a dummy 'My Computer' row above NautilusSidebar.
+
+        Wraps NautilusSidebar in a vertical GtkBox (our_row + NautilusSidebar) and
+        sets that as the AdwToolbarView content. Our row is a direct sibling of
+        NautilusSidebar, outside the GtkListBox that update_places() clears.
+        One-time injection per window; no re-injection needed.
+        """
+        split_view = next(
+            (w for w in _all_widgets(win) if isinstance(w, Adw.OverlaySplitView)), None
+        )
+        sidebar_toolbar = split_view.get_sidebar() if split_view else None
+        if not isinstance(sidebar_toolbar, Adw.ToolbarView):
+            _log(
+                f"_inject_sidebar_link: expected AdwToolbarView from get_sidebar(), "
+                f"got {type(sidebar_toolbar).__name__ if sidebar_toolbar else 'None'}"
+            )
+            return False
+
+        nautilus_sidebar = sidebar_toolbar.get_content()
+        if nautilus_sidebar is None:
+            _log("_inject_sidebar_link: AdwToolbarView content is None")
+            return False
+
+        _log(f"_inject_sidebar_link: content={type(nautilus_sidebar).__name__}")
+
+        list_row = self._build_computer_sidebar_row(win)
+
+        if DEBUG_NATIVE_SIDEBAR_ACTIVE:
+            native_listbox = self._find_sidebar_listbox(nautilus_sidebar)
+            if native_listbox is not None:
+                return self._inject_native_sidebar_link(
+                    win,
+                    nautilus_sidebar,
+                    native_listbox,
+                    list_row,
+                )
+            _log("_inject_sidebar_link: native listbox unavailable, using separate list")
+
+        our_listbox = Gtk.ListBox()
+        our_listbox.set_name("my_computer_list")
+        our_listbox.add_css_class("navigation-sidebar")
+        our_listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
+
+        our_listbox.append(list_row)
+        our_listbox.connect(
+            "row-activated",
+            lambda _lb, _row: self._navigate_to(DISKS_URI, win),
+        )
 
         wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
@@ -3010,7 +3101,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                 w.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
                 w.set_margin_top(0)
                 _log("_inject_sidebar_link: inner scroll disabled ✓")
-            elif isinstance(w, Gtk.ListBox):
+            elif native_listbox is None and isinstance(w, Gtk.ListBox):
                 native_listbox = w
 
         nautilus_sidebar.set_margin_top(0)

@@ -4,9 +4,6 @@ Planned fixes, features, and improvements. Subject to change as the project evol
 
 ---
 
-## In progressw
-- fix: computer icon and text wrong left margin on some systems (from Reddit) 
-
 ## Next up
 - fix: disk cards update on connect
 - fix: update disk bar after file transfer

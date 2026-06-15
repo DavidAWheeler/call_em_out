@@ -61,7 +61,7 @@ def _sidebar_mode(native_enabled_default: bool) -> str:
     mode = (os.environ.get("MC_SIDEBAR_MODE") or "").strip().lower()
     if mode in ("native-list", "native-list-bottom", "inner-wrapper", "outer-wrapper"):
         return mode
-    return "native-list" if native_enabled_default else "outer-wrapper"
+    return "inner-wrapper" if native_enabled_default else "outer-wrapper"
 
 
 DEBUG_MAIN_VIEW_ACTIVE = _flag("MC_MAIN_VIEW")  # main view: panel overlay over the file view
@@ -69,7 +69,7 @@ DEBUG_COMPUTER_BUTTON_ACTIVE = _flag("MC_COMPUTER_BUTTON")  # left sidebar: "Com
 DEBUG_NATIVE_SIDEBAR_ACTIVE = _flag("MC_NATIVE_SIDEBAR")  # native sidebar row, set 0 for fallback
 DEBUG_SIDEBAR_MODE = _sidebar_mode(
     DEBUG_NATIVE_SIDEBAR_ACTIVE
-)  # native-list | native-list-bottom | inner-wrapper | outer-wrapper
+)  # inner-wrapper default | native-list | native-list-bottom | outer-wrapper
 DEBUG_PATHBAR_ACTIVE = _flag("MC_PATHBAR")  # top URL bar: chip icon pinning
 DEBUG_SORT_WATCH_ACTIVE = _flag("MC_SORT_WATCH")  # top view-mode/sort buttons: sort metadata watch
 DEBUG_SELFTEST = _flag("MC_SELFTEST", default=False)  # in-process navigation self-test driver
@@ -417,13 +417,24 @@ _CSS = b"""
     margin: 0;
     padding: 0;
 }
-/* The Computer row stays in its own ListBox so Nautilus' runtime sidebar rebuilds
-   cannot clear it. Keep the theme's native .navigation-sidebar row styling and
-   only collapse the join between this one-row list and Nautilus' real list. */
-#my_computer_list {
+"""
+
+# Scoped tightly to #my_computer_list to avoid side effects elsewhere.
+#
+# inner-wrapper mode: the two listboxes are direct siblings so the + combinator
+# fires. Both carry .navigation-sidebar so the theme's base padding (6px all sides)
+# applies to each. Zeroing the seam padding makes the join seamless.
+# The inter-row gap between our last row and the first native row is set
+# programmatically by _wire_native_row_gap, which reads the actual pixel gap
+# between the first two native rows after allocation via translate_coordinates.
+# This adapts to whatever value the active theme uses without hardcoding 3px.
+# NautilusSidebarRow styles itself via .sidebar-revealer - no row/revealer
+# overrides needed here.
+_CSS_SIDEBAR = b"""
+#my_computer_list.navigation-sidebar {
     padding-bottom: 0;
 }
-.places-sidebar-list {
+#my_computer_list.navigation-sidebar + .places-sidebar-list {
     padding-top: 0;
 }
 """
@@ -1083,6 +1094,13 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             display,
             css,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+        )
+        css_sidebar = Gtk.CssProvider()
+        css_sidebar.load_from_data(_CSS_SIDEBAR)
+        Gtk.StyleContext.add_provider_for_display(
+            display,
+            css_sidebar,
+            Gtk.STYLE_PROVIDER_PRIORITY_USER + 1,
         )
         if self._bar_css_display is None:
             self._bar_css_display = display
@@ -2960,6 +2978,45 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         )
         _log("_inject_sidebar_link: cross-deselect wired ✓")
 
+    def _wire_native_row_gap(self, our_listbox: Gtk.ListBox, native_listbox: Gtk.ListBox) -> None:
+        # Measure the actual pixel gap between the first two native sidebar rows
+        # and apply it as margin_bottom on our listbox so the join is seamless
+        # regardless of which GTK theme is active.
+        # translate_coordinates reads the live allocation; setting margin on our
+        # listbox (not the native one) avoids a layout loop.
+        last_gap: list[int | None] = [None]
+
+        def _measure() -> bool:
+            row0 = native_listbox.get_row_at_index(0)
+            row1 = native_listbox.get_row_at_index(1)
+            if row0 is None or row1 is None:
+                our_listbox.set_margin_bottom(0)
+                return GLib.SOURCE_REMOVE
+            if not row0.get_realized() or not row1.get_realized():
+                our_listbox.set_margin_bottom(0)
+                return GLib.SOURCE_REMOVE
+            coords = row1.translate_coordinates(row0, 0, 0)
+            if coords is None:
+                our_listbox.set_margin_bottom(0)
+                return GLib.SOURCE_REMOVE
+            # PyGObject returns (x, y) as a 2-tuple
+            row1_top_in_row0 = coords[1] if len(coords) >= 2 else coords[0]
+            target = max(0, int(row1_top_in_row0 - row0.get_height()))
+            our_listbox.set_margin_bottom(target)
+            last_gap[0] = target
+            return GLib.SOURCE_REMOVE
+
+        def _schedule(_lb=None) -> None:
+            GLib.idle_add(_measure)
+
+        # notify::height/width replace the removed size-allocate signal (GTK 4.12+)
+        native_listbox.connect("notify::height", lambda *_: _schedule())
+        native_listbox.connect("notify::width", lambda *_: _schedule())
+        if native_listbox.get_mapped():
+            _schedule()
+        else:
+            native_listbox.connect("map", _schedule)
+
     def _build_computer_sidebar_row(
         self, win: Gtk.Window, nautilus_sidebar: Gtk.Widget | None = None
     ) -> Gtk.ListBoxRow:
@@ -3134,14 +3191,17 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         list_row: Gtk.ListBoxRow,
     ) -> bool:
         our_listbox = self._build_computer_sidebar_listbox(win, list_row)
-        our_listbox.add_css_class("places-sidebar-list")
+        native_listbox.add_css_class("places-sidebar-list")
 
-        wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        wrapper.set_name("my_computer_sidebar_wrapper")
+        wrapper.set_margin_bottom(0)
         native_scrolled_window.set_child(wrapper)
         wrapper.append(our_listbox)
         wrapper.append(native_listbox)
 
         self._wire_sidebar_cross_deselect(our_listbox, native_listbox)
+        self._wire_native_row_gap(our_listbox, native_listbox)
 
         state = self._windows.get(win)
         if state is not None:

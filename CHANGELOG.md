@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.6.0
+### UX
+- make Computer button on sidebar compatible with native style and custom GTK4 CSS styles
+- make Computer view panel compatible with native style and custom GTK4 CSS styles
+
+
 ## v0.5.4
 ### i18n
 - i18n: finalize all UI strings in the Computer view and Settings panel

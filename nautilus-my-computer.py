@@ -396,9 +396,6 @@ _CSS = b"""
 .unmounted {
     opacity: 0.5;
 }
-.vanilla-diskinfo-view-hidden {
-    background: @view_bg_color;
-}
 .vanilla-diskinfo-view-hidden > * {
     opacity: 0;
 }
@@ -1197,19 +1194,21 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         self._trace_view_set(state["overlay"], name, site)
         # files_widget is the always-present Overlay base — never hidden (hiding
         # it would reparent/unmap and risk the GTK_IS_STACK crash). Toggle only
-        # the panel overlay's visibility. The panel is opaque and FILL/FILL, so
-        # it absorbs all pointer events without needing set_sensitive() on the
-        # base. Keyboard type-ahead is blocked separately by the capture-phase
-        # key guard (_on_window_key_capture). Do NOT call set_sensitive() on the
-        # base (AdwTabView): it covers all tabs, so toggling it disrupts Nautilus
+        # the panel overlay's visibility. The panel is FILL/FILL and absorbs all
+        # pointer events without needing set_sensitive() on the base. Keyboard
+        # type-ahead is blocked separately by the capture-phase key guard
+        # (_on_window_key_capture). Do NOT call set_sensitive() on the base
+        # (AdwTabView): it covers all tabs, so toggling it disrupts Nautilus
         # keyboard controllers on other tabs and causes freezes in multi-tab.
         panel.set_visible(name == VIEW_DISKINFO)
 
         state["visible_view"] = name
-        # Whichever view we land on is now correct to show: either the panel
-        # covers the vanilla computer:/// view, or we genuinely landed on a
-        # normal folder that must never be blanked.
-        self._blank_vanilla_view(state, False)
+        # While the panel is shown, hide the vanilla computer:/// contents
+        # (icons/labels) underneath via opacity. The vanilla view is itself a
+        # .nautilus-grid-view, so its theme background/radius/margin/shadow stay
+        # intact and serve as the opaque backdrop behind the panel's transparent
+        # heading rows and card gaps. Un-blank when we land on a normal folder.
+        self._blank_vanilla_view(state, name == VIEW_DISKINFO)
         return True
 
     def _blank_vanilla_view(self, state: dict, hidden: bool) -> None:
@@ -1898,7 +1897,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             container.set_activate_on_single_click(False)
             container.set_hexpand(True)
             container.set_valign(Gtk.Align.START)
-            container.get_style_context().add_class("view")
+
             container.connect("child-activated", self._on_card_activated, win)
             container.connect("selected-children-changed", self._on_flow_selection_changed, win)
             section_flows.append(container)

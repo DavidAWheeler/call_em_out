@@ -109,6 +109,8 @@ DBUS_PATH_NAUTILUS_FILEOPS = "/org/gnome/Nautilus/FileOperations2"
 # GSettings changed, Gio.FileMonitor, Gtk.Application window-added). The values
 # below are one-shot retry/debounce intervals, not continuous poll periods.
 _REFRESH_DEBOUNCE_MS = 300  # coalesce rapid mount/unmount/plug events
+_SIDEBAR_RECHECK_RETRY_MS = 300  # first delayed retry after async sidebar rebuild events
+_SIDEBAR_RECHECK_LATE_MS = 1000  # second delayed retry after async sidebar rebuild events
 _WIN_INIT_RETRY_MS = 20  # retry interval while waiting for NautilusWindow widget tree
 _WIN_INIT_MAX_ATTEMPTS = 100  # ~2 s budget waiting for the first view load to settle
 _NAV_RETRY_MS = 60  # retry interval while navigating to computer:///
@@ -935,9 +937,11 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         self._windows: dict = {}
         self._polling_started = False
         self._refresh_pending = False  # debounce flag for live-refresh
+        self._bookmark_recheck_pending = False
         self._local_poll_stop: threading.Event | None = None
         self._net_poll_timer_id: int | None = None
         self._net_poll_cancellable: Gio.Cancellable | None = None
+        self._bookmark_monitor = None
 
         self._sort_column: str = "name"
         self._sort_reverse: bool = False
@@ -998,6 +1002,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         # Kick off async network:/// discovery immediately
         _refresh_network_places(on_done=self._do_live_refresh)
+
+        self._watch_bookmarks_file()
 
         GLib.idle_add(self._late_init)
 
@@ -1397,6 +1403,51 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
     def _on_disk_event(self, _monitor, *_args) -> None:
         """VolumeMonitor signal handler — debounced."""
         self._schedule_live_refresh()
+
+    def _watch_bookmarks_file(self) -> None:
+        bookmarks_path = os.path.join(GLib.get_user_config_dir(), "gtk-3.0", "bookmarks")
+        try:
+            bookmarks_file = Gio.File.new_for_path(bookmarks_path)
+            self._bookmark_monitor = bookmarks_file.monitor_file(
+                Gio.FileMonitorFlags.NONE,
+                None,
+            )
+            self._bookmark_monitor.set_rate_limit(1000)
+            self._bookmark_monitor.connect("changed", self._on_bookmarks_file_changed)
+        except Exception as e:
+            self._bookmark_monitor = None
+            _log(f"bookmark file monitor unavailable ({e})")
+
+    def _on_bookmarks_file_changed(
+        self,
+        _monitor,
+        _child,
+        _other_file,
+        event_type: Gio.FileMonitorEvent,
+    ) -> None:
+        if event_type not in (
+            Gio.FileMonitorEvent.CHANGED,
+            Gio.FileMonitorEvent.CREATED,
+            Gio.FileMonitorEvent.CHANGES_DONE_HINT,
+        ):
+            return
+        self._schedule_bookmarks_sidebar_recheck()
+
+    def _schedule_bookmarks_sidebar_recheck(self) -> None:
+        if self._bookmark_recheck_pending:
+            return
+        self._bookmark_recheck_pending = True
+        GLib.idle_add(self._do_bookmarks_sidebar_recheck)
+
+    def _do_bookmarks_sidebar_recheck(self) -> bool:
+        self._bookmark_recheck_pending = False
+        for win, state in list(self._windows.items()):
+            if not state.get("sidebar_native"):
+                continue
+            self._schedule_native_sidebar_ensure(win)
+            self._schedule_native_sidebar_ensure(win, _SIDEBAR_RECHECK_RETRY_MS)
+            self._schedule_native_sidebar_ensure(win, _SIDEBAR_RECHECK_LATE_MS)
+        return GLib.SOURCE_REMOVE
 
     def _on_proc_mounts_changed(self, _source, _condition) -> bool:
         """/proc/mounts POLLPRI handler — any kernel mount change."""
@@ -2920,7 +2971,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             row_gtype = GObject.type_from_name("NautilusSidebarRow")
             row_props = {
                 "uri": DISKS_URI,
-                "place-type": 1,  # NAUTILUS_SIDEBAR_ROW_BUILT_IN
+                "place-type": 0,  # NAUTILUS_SIDEBAR_ROW_INVALID, sorts before built-in rows
                 "section-type": 1,  # NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS
                 "order-index": 0,
                 "label": _LOCATION_TITLE,
@@ -3072,7 +3123,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             state["sidebar_native_bottom"] = keep_at_bottom
 
         self._ensure_native_sidebar_row(win)
-        self._schedule_native_sidebar_ensure(win, 300)
+        self._schedule_native_sidebar_ensure(win, _SIDEBAR_RECHECK_RETRY_MS)
         return True
 
     def _inject_inner_wrapper_sidebar_link(

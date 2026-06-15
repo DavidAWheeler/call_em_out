@@ -2989,20 +2989,37 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         def _measure() -> bool:
             row0 = native_listbox.get_row_at_index(0)
             row1 = native_listbox.get_row_at_index(1)
-            if row0 is None or row1 is None:
+            our_row = our_listbox.get_row_at_index(0)
+            if row0 is None or row1 is None or our_row is None:
                 our_listbox.set_margin_bottom(0)
                 return GLib.SOURCE_REMOVE
-            if not row0.get_realized() or not row1.get_realized():
+            if not row0.get_realized() or not row1.get_realized() or not our_row.get_realized():
                 our_listbox.set_margin_bottom(0)
                 return GLib.SOURCE_REMOVE
+            # Desired gap: the rendered space between two consecutive native rows.
             coords = row1.translate_coordinates(row0, 0, 0)
             if coords is None:
                 our_listbox.set_margin_bottom(0)
                 return GLib.SOURCE_REMOVE
-            # PyGObject returns (x, y) as a 2-tuple
+            # PyGObject returns (x, y) as a 2-tuple.
             row1_top_in_row0 = coords[1] if len(coords) >= 2 else coords[0]
-            target = max(0, int(row1_top_in_row0 - row0.get_height()))
-            our_listbox.set_margin_bottom(target)
+            desired_gap = row1_top_in_row0 - row0.get_height()
+            # Actual rendered seam between our last row and the first native row.
+            # This already includes whatever margin_bottom we applied last pass,
+            # plus any natural spacing (listbox padding, row revealer margins) that
+            # the seam CSS doesn't fully zero. Setting margin_bottom = desired_gap
+            # blindly double-counts that natural spacing, leaving an extra gap.
+            seam_coords = row0.translate_coordinates(our_row, 0, 0)
+            if seam_coords is None:
+                our_listbox.set_margin_bottom(0)
+                return GLib.SOURCE_REMOVE
+            row0_top_in_our_row = seam_coords[1] if len(seam_coords) >= 2 else seam_coords[0]
+            actual_seam = row0_top_in_our_row - our_row.get_height()
+            current_margin = our_listbox.get_margin_bottom()
+            natural_seam = actual_seam - current_margin
+            target = max(0, int(round(desired_gap - natural_seam)))
+            if target != current_margin:
+                our_listbox.set_margin_bottom(target)
             last_gap[0] = target
             return GLib.SOURCE_REMOVE
 

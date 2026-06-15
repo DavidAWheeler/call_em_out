@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.5.4
+### i18n
+- i18n: finalize all UI strings in the Computer view and Settings panel
+- i18n: update and complete translations for all supported languages
+
+---
+
 ## v0.5.3
 ### i18n
 - Disk size units now use `GLib.format_size()` for locale-aware output (e.g. "Ko / Mo / Go" in French, "octet" for bytes) - no custom unit translations needed

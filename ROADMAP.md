@@ -4,9 +4,8 @@ Planned fixes, features, and improvements. Subject to change as the project evol
 
 ---
 
-## In progress
-- i18n: finalize all UI strings in the Computer view and Settings panel
-- i18n: update and complete translations for all supported languages
+## In progressw
+- fix: computer icon and text wrong left margin on some systems (from Reddit) 
 
 ## Next up
 - fix: disk cards update on connect

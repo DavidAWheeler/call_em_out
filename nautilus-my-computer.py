@@ -41,6 +41,15 @@ def _(text: str) -> str:
     return text
 
 
+def _strip_mnemonic(text: str) -> str:
+    """Drop the GTK mnemonic underscore from a label (e.g. 'Empty _Trash' -> 'Empty Trash').
+
+    Lets us pass Nautilus' exact msgids to _() so its translations are reused, then
+    render a plain label. Literal underscores in source are written '__' and preserved.
+    """
+    return text.replace("__", "\0").replace("_", "").replace("\0", "_")
+
+
 DEBUG_LOG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 DEBUG_LOG_PREFIX = "MyComputer"  # prefix for all debug lines, to make them easy to filter in logs
 
@@ -204,6 +213,68 @@ EXTERNAL_PREFIXES = ("/media/", "/run/media/", "/mnt/")
 
 
 @dataclasses.dataclass
+class MenuItem:
+    """One entry in a contextual (right-click) menu.
+
+    Reusable across sidebar places and disk-group cards. The action is a plain
+    callable run on activate, so callers don't have to register Gio actions or
+    juggle action-name strings.
+    """
+
+    label: str  # display label (translatable)
+    action: object = None  # callable() run on activate; None = inert item
+    shortcut: str = ""  # accel string, e.g. "Return", "<Control>Return", "<Alt>Return"
+    section: int = 0  # consecutive items sharing a number group together; gaps draw separators
+    enabled: bool = True  # rendered greyed out when False
+    visible: bool = True  # omitted from the menu entirely when False
+
+
+@dataclasses.dataclass
+class ContextualMenu:
+    """A reusable right-click menu: an ordered list of MenuItem grouped into sections.
+
+    Built fresh at show-time so items can reflect live state (on-page, mounted,
+    ejectable, ...). Call build_popover() to turn it into a ready Gtk.PopoverMenu.
+    """
+
+    items: list = dataclasses.field(default_factory=list)
+
+    def build_popover(self, parent: Gtk.Widget, prefix: str) -> Gtk.PopoverMenu:
+        model = Gio.Menu()
+        ag = Gio.SimpleActionGroup()
+        section_menu = None
+        current_section = None
+        counter = 0
+
+        for it in self.items:
+            if not it.visible:
+                continue
+            if section_menu is None or it.section != current_section:
+                section_menu = Gio.Menu()
+                model.append_section(None, section_menu)
+                current_section = it.section
+
+            action_name = f"item{counter}"
+            counter += 1
+            menu_item = Gio.MenuItem.new(it.label, f"{prefix}.{action_name}")
+            if it.shortcut:
+                menu_item.set_attribute_value("accel", GLib.Variant("s", it.shortcut))
+            section_menu.append_item(menu_item)
+
+            act = Gio.SimpleAction.new(action_name, None)
+            act.set_enabled(it.enabled)
+            if callable(it.action):
+                act.connect("activate", lambda *_a, cb=it.action: cb())
+            ag.add_action(act)
+
+        popover = Gtk.PopoverMenu.new_from_model(model)
+        popover.set_has_arrow(False)
+        popover.set_parent(parent)
+        popover.insert_action_group(prefix, ag)
+        return popover
+
+
+@dataclasses.dataclass
 class PlaceEntry:
     """Describes one fixed sidebar place (Computer, Home, Recent, Starred, Network, Trash)."""
 
@@ -215,6 +286,76 @@ class PlaceEntry:
     visible: bool = True
     tooltip: str = ""
     order_index: int = 0  # passed to NautilusSidebarRow "order-index" property
+    menu: object = None  # factory menu(ext, win, entry) -> ContextualMenu, or None for no menu
+
+
+def _open_actions(ext, win, uri: str, open_enabled: bool = True) -> list:
+    """The three open actions shared by every place row (section 0)."""
+    return [
+        MenuItem(_("Open"), action=lambda: ext._do_open(uri, win), enabled=open_enabled),
+        MenuItem(_("Open in New Tab"), action=lambda: ext._do_open_tab(uri, win)),
+        MenuItem(_("Open in New Window"), action=lambda: ext._do_open_window(uri)),
+    ]
+
+
+def _computer_context_menu(ext, win, entry: PlaceEntry) -> ContextualMenu:
+    """Computer row: open actions + settings, with Open greyed out when already shown."""
+    uri = entry.uri
+    on_computer = ext._windows.get(win, {}).get("visible_view") == VIEW_DISKINFO
+    return ContextualMenu(
+        _open_actions(ext, win, uri, open_enabled=not on_computer)
+        + [MenuItem(MENU_ITEM_LABEL, action=lambda: ext._launch_prefs(win), section=1)]
+    )
+
+
+def _home_context_menu(ext, win, entry: PlaceEntry) -> ContextualMenu:
+    """Home row: open actions + Properties."""
+    uri = entry.uri
+    return ContextualMenu(
+        _open_actions(ext, win, uri)
+        + [MenuItem(_("Properties"), action=lambda: ext._do_properties(uri, win), section=1)]
+    )
+
+
+def _recent_context_menu(ext, win, entry: PlaceEntry) -> ContextualMenu:
+    """Recent row: open actions + File History Settings."""
+    return ContextualMenu(
+        _open_actions(ext, win, entry.uri)
+        + [
+            MenuItem(
+                _strip_mnemonic(_("File History _Settings…")),
+                action=lambda: ext._launch_settings_panel("privacy"),
+                section=1,
+            )
+        ]
+    )
+
+
+def _trash_context_menu(ext, win, entry: PlaceEntry) -> ContextualMenu:
+    """Trash row: open actions + Trash Settings + Empty Trash + Properties."""
+    uri = entry.uri
+    return ContextualMenu(
+        _open_actions(ext, win, uri)
+        + [
+            MenuItem(
+                _strip_mnemonic(_("_Trash Settings")),
+                action=lambda: ext._launch_settings_panel("privacy"),
+                section=1,
+            ),
+            MenuItem(
+                _strip_mnemonic(_("Empty _Trash")),
+                action=lambda: ext._do_empty_trash(win),
+                enabled=_trash_full,
+                section=2,
+            ),
+            MenuItem(_("Properties"), action=lambda: ext._do_properties(uri, win), section=3),
+        ]
+    )
+
+
+def _open_only_context_menu(ext, win, entry: PlaceEntry) -> ContextualMenu:
+    """Starred / Network rows: just the three open actions, no extra sections."""
+    return ContextualMenu(_open_actions(ext, win, entry.uri))
 
 
 PLACES: list[PlaceEntry] = [
@@ -226,6 +367,7 @@ PLACES: list[PlaceEntry] = [
         uri=DISKS_URI,
         tooltip=_("Open My Computer"),
         order_index=0,
+        menu=_computer_context_menu,
     ),
     PlaceEntry(
         name="home",
@@ -235,6 +377,7 @@ PLACES: list[PlaceEntry] = [
         uri=GLib.filename_to_uri(GLib.get_home_dir(), None),
         tooltip=_("Open your personal folder"),
         order_index=1,
+        menu=_home_context_menu,
     ),
     PlaceEntry(
         name="recent",
@@ -244,6 +387,7 @@ PLACES: list[PlaceEntry] = [
         uri="recent:///",
         tooltip=_("Open recently used documents"),
         order_index=2,
+        menu=_recent_context_menu,
     ),
     PlaceEntry(
         name="starred",
@@ -253,6 +397,7 @@ PLACES: list[PlaceEntry] = [
         uri="starred:///",
         tooltip=_("Open starred files"),
         order_index=3,
+        menu=_open_only_context_menu,
     ),
     PlaceEntry(
         name="network",
@@ -262,6 +407,7 @@ PLACES: list[PlaceEntry] = [
         uri="x-network-view:///",
         tooltip=_("Browse the network"),
         order_index=4,
+        menu=_open_only_context_menu,
     ),
     PlaceEntry(
         name="trash",
@@ -271,8 +417,84 @@ PLACES: list[PlaceEntry] = [
         uri="trash:///",
         tooltip=_("Open the trash"),
         order_index=5,
+        menu=_trash_context_menu,
     ),
 ]
+
+
+def _disk_context_menu(ext, win, m) -> ContextualMenu:
+    """Build a disk card's right-click menu from live mount state.
+
+    Same three-section layout as before: open actions, then mount/eject/unmount +
+    format (non-system), then Properties (mounted only). Unmounted disks mount
+    first, then open in the requested target.
+    """
+    nav_uri = m.nav_uri or (Gio.File.new_for_path(m.mountpoint).get_uri() if m.mountpoint else "")
+    is_mounted = m.is_mounted
+    is_system = m.mountpoint == "/"
+    device = m.device or ""
+    if not device.startswith("/dev/") and m.gio_volume:
+        unix_dev = m.gio_volume.get_identifier(Gio.VOLUME_IDENTIFIER_KIND_UNIX_DEVICE)
+        if unix_dev:
+            device = unix_dev
+
+    # Section 0: open actions (all disks). Mounted -> navigate; unmounted -> mount then open.
+    if is_mounted and nav_uri:
+        items = [
+            MenuItem(_("Open"), action=lambda: ext._do_open(nav_uri, win), shortcut="Return"),
+            MenuItem(
+                _("Open in New Tab"),
+                action=lambda: ext._do_open_tab(nav_uri, win),
+                shortcut="<Control>Return",
+            ),
+            MenuItem(
+                _("Open in New Window"),
+                action=lambda: ext._do_open_window(nav_uri),
+                shortcut="<Shift>Return",
+            ),
+        ]
+    else:
+        items = [
+            MenuItem(
+                _("Open"),
+                action=lambda: ext._do_mount_then_open(m, win, "current"),
+                shortcut="Return",
+            ),
+            MenuItem(
+                _("Open in New Tab"),
+                action=lambda: ext._do_mount_then_open(m, win, "tab"),
+                shortcut="<Control>Return",
+            ),
+            MenuItem(
+                _("Open in New Window"),
+                action=lambda: ext._do_mount_then_open(m, win, "window"),
+                shortcut="<Shift>Return",
+            ),
+        ]
+
+    # Section 1: mount / unmount / eject + format (non-system only).
+    if not is_system:
+        if not is_mounted:
+            items.append(MenuItem(_("Mount"), action=lambda: ext._do_mount(m, win), section=1))
+        elif m.can_eject:
+            items.append(MenuItem(_("Eject"), action=lambda: ext._do_eject(m), section=1))
+        else:
+            items.append(MenuItem(_("Unmount"), action=lambda: ext._do_unmount(m), section=1))
+        if device.startswith("/dev/"):
+            items.append(MenuItem(_("Format…"), action=lambda: ext._do_format(device), section=1))
+
+    # Section 2: properties (mounted disks only).
+    if is_mounted and nav_uri:
+        items.append(
+            MenuItem(
+                _("Properties"),
+                action=lambda: ext._do_properties(nav_uri, win),
+                shortcut="<Alt>Return",
+                section=2,
+            )
+        )
+
+    return ContextualMenu(items)
 
 
 @dataclasses.dataclass
@@ -308,6 +530,9 @@ class MountInfo:
     is_removable: bool = False
     can_eject: bool = False
     is_network_place: bool = False
+
+    # Right-click menu factory menu(ext, win, m) -> ContextualMenu (built at show-time).
+    menu: object = _disk_context_menu
 
     @property
     def used(self) -> int:
@@ -2627,96 +2852,13 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
     def _on_disk_right_clicked(self, gesture, _n, x, y, win: Gtk.Window, row: Gtk.Box) -> None:
         mount_key = getattr(row, "_mount_key", None)
         m = _disk_data.get(mount_key) if mount_key else None
-        nav_uri = getattr(row, "_nav_uri", "")
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
 
-        if not m:
+        if not m or not callable(m.menu):
             return
 
-        is_mounted = m.is_mounted
-        is_system = m.mountpoint == "/"
-        device = m.device or ""
-        if not device.startswith("/dev/") and m.gio_volume:
-            unix_dev = m.gio_volume.get_identifier(Gio.VOLUME_IDENTIFIER_KIND_UNIX_DEVICE)
-            if unix_dev:
-                device = unix_dev
-
-        def _accel_item(label, action, accel):
-            item = Gio.MenuItem.new(label, action)
-            item.set_attribute_value("accel", GLib.Variant("s", accel))
-            return item
-
-        menu = Gio.Menu()
-        ag = Gio.SimpleActionGroup()
-
-        # Section 1: open actions (all disks)
-        open_sec = Gio.Menu()
-        open_sec.append_item(_accel_item(_("Open"), "diskrow.open", "Return"))
-        open_sec.append_item(
-            _accel_item(_("Open in New Tab"), "diskrow.open-tab", "<Control>Return")
-        )
-        open_sec.append_item(
-            _accel_item(_("Open in New Window"), "diskrow.open-window", "<Shift>Return")
-        )
-        menu.append_section(None, open_sec)
-
-        open_act = Gio.SimpleAction.new("open", None)
-        if is_mounted and nav_uri:
-            open_act.connect("activate", lambda *_: self._do_open(nav_uri, win))
-        else:
-            open_act.connect("activate", lambda *_: self._do_mount_then_open(m, win, "current"))
-        ag.add_action(open_act)
-        tab_act = Gio.SimpleAction.new("open-tab", None)
-        if is_mounted and nav_uri:
-            tab_act.connect("activate", lambda *_: self._do_open_tab(nav_uri, win))
-        else:
-            tab_act.connect("activate", lambda *_: self._do_mount_then_open(m, win, "tab"))
-        ag.add_action(tab_act)
-        win_act = Gio.SimpleAction.new("open-window", None)
-        if is_mounted and nav_uri:
-            win_act.connect("activate", lambda *_: self._do_open_window(nav_uri))
-        else:
-            win_act.connect("activate", lambda *_: self._do_mount_then_open(m, win, "window"))
-        ag.add_action(win_act)
-
-        # Section 2: mount / unmount / eject + format (non-system only)
-        if not is_system:
-            mid_sec = Gio.Menu()
-            if not is_mounted:
-                mid_sec.append(_("Mount"), "diskrow.mount")
-                mount_act = Gio.SimpleAction.new("mount", None)
-                mount_act.connect("activate", lambda *_: self._do_mount(m, win))
-                ag.add_action(mount_act)
-            elif m.can_eject:
-                mid_sec.append(_("Eject"), "diskrow.eject")
-                eject_act = Gio.SimpleAction.new("eject", None)
-                eject_act.connect("activate", lambda *_: self._do_eject(m))
-                ag.add_action(eject_act)
-            else:
-                mid_sec.append(_("Unmount"), "diskrow.unmount")
-                unmount_act = Gio.SimpleAction.new("unmount", None)
-                unmount_act.connect("activate", lambda *_: self._do_unmount(m))
-                ag.add_action(unmount_act)
-            if device.startswith("/dev/"):
-                mid_sec.append(_("Format…"), "diskrow.format")
-                fmt_act = Gio.SimpleAction.new("format", None)
-                fmt_act.connect("activate", lambda *_: self._do_format(device))
-                ag.add_action(fmt_act)
-            menu.append_section(None, mid_sec)
-
-        # Section 3: properties (mounted disks only)
-        if is_mounted and nav_uri:
-            props_sec = Gio.Menu()
-            props_sec.append_item(_accel_item(_("Properties"), "diskrow.props", "<Alt>Return"))
-            menu.append_section(None, props_sec)
-            props_act = Gio.SimpleAction.new("props", None)
-            props_act.connect("activate", lambda *_: self._do_properties(nav_uri, win))
-            ag.add_action(props_act)
-
-        popover = Gtk.PopoverMenu.new_from_model(menu)
-        popover.set_has_arrow(False)
-        popover.set_parent(row)
-        popover.insert_action_group("diskrow", ag)
+        ctx_menu = m.menu(self, win, m)
+        popover = ctx_menu.build_popover(row, "diskrow")
         rect = Gdk.Rectangle()
         rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
         popover.set_pointing_to(rect)
@@ -2912,6 +3054,44 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         # Start polling immediately so we catch the window as early as possible.
         _try_parent()
+        Gio.bus_get(Gio.BusType.SESSION, None, _on_bus)
+
+    def _launch_settings_panel(self, panel: str) -> None:
+        """Open a gnome-control-center panel (e.g. 'privacy'), matching native rows."""
+        try:
+            Gio.Subprocess.new(["gnome-control-center", panel], Gio.SubprocessFlags.NONE)
+        except GLib.Error as e:
+            _log(f"settings launch failed ({panel}): {e.message}")
+
+    def _do_empty_trash(self, win: Gtk.Window) -> None:
+        """Empty the trash via Nautilus' own engine so the native confirm dialog shows."""
+
+        def _on_call(bus, result, _):
+            try:
+                bus.call_finish(result)
+            except Exception as e:
+                _log(f"EmptyTrash failed: {e}")
+            GLib.idle_add(self._repopulate_visible)
+
+        def _on_bus(_, result):
+            try:
+                bus = Gio.bus_get_finish(result)
+                bus.call(
+                    DBUS_NAUTILUS,
+                    DBUS_PATH_NAUTILUS_FILEOPS,
+                    DBUS_NAUTILUS_FILEOPS,
+                    "EmptyTrash",
+                    GLib.Variant("(ba{sv})", (True, {})),
+                    None,
+                    Gio.DBusCallFlags.NONE,
+                    -1,
+                    None,
+                    _on_call,
+                    None,
+                )
+            except Exception as e:
+                _log(f"EmptyTrash bus error: {e}")
+
         Gio.bus_get(Gio.BusType.SESSION, None, _on_bus)
 
     def _launch_prefs(self, win: Gtk.Window | None = None) -> None:
@@ -3387,50 +3567,13 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
             GLib.idle_add(_pin_row_icon)
 
-        # Right-click context menu: Computer entry only.
-        if entry.name == "computer":
-            uri = entry.uri
+        # Right-click context menu: any place whose entry carries a menu factory.
+        if callable(entry.menu):
 
-            def _on_computer_right_clicked(gesture, _n, x, y):
+            def _on_place_right_clicked(gesture, _n, x, y):
                 gesture.set_state(Gtk.EventSequenceState.CLAIMED)
-
-                on_computer = self._windows.get(win, {}).get("visible_view") == VIEW_DISKINFO
-
-                menu = Gio.Menu()
-                ag = Gio.SimpleActionGroup()
-
-                primary = Gio.Menu()
-                primary.append(_("Open"), "comprow.open")
-                primary.append(_("Open in New Tab"), "comprow.open-tab")
-                primary.append(_("Open in New Window"), "comprow.open-window")
-                menu.append_section(None, primary)
-
-                settings_section = Gio.Menu()
-                settings_section.append(MENU_ITEM_LABEL, "comprow.settings")
-                menu.append_section(None, settings_section)
-
-                open_act = Gio.SimpleAction.new("open", None)
-                open_act.set_enabled(not on_computer)
-                open_act.connect("activate", lambda *_: self._do_open(uri, win))
-                ag.add_action(open_act)
-
-                tab_act = Gio.SimpleAction.new("open-tab", None)
-                tab_act.connect("activate", lambda *_: self._do_open_tab(uri, win))
-                ag.add_action(tab_act)
-
-                win_act = Gio.SimpleAction.new("open-window", None)
-                win_act.connect("activate", lambda *_: self._do_open_window(uri))
-                ag.add_action(win_act)
-
-                settings_act = Gio.SimpleAction.new("settings", None)
-                settings_act.connect("activate", lambda *_: self._launch_prefs(win))
-                ag.add_action(settings_act)
-
-                list_row.insert_action_group("comprow", ag)
-
-                popover = Gtk.PopoverMenu.new_from_model(menu)
-                popover.set_has_arrow(False)
-                popover.set_parent(list_row)
+                ctx_menu = entry.menu(self, win, entry)
+                popover = ctx_menu.build_popover(list_row, f"place_{entry.name}")
                 rect = Gdk.Rectangle()
                 rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
                 popover.set_pointing_to(rect)
@@ -3438,7 +3581,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
             right_click = Gtk.GestureClick()
             right_click.set_button(3)
-            right_click.connect("pressed", _on_computer_right_clicked)
+            right_click.connect("pressed", _on_place_right_clicked)
             list_row.add_controller(right_click)
 
         # Hide the eject button - not applicable for our injected entries.

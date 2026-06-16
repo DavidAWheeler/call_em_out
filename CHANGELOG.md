@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.7.0
+### Added
+- Custom Location group on the sidebar, replacing Nautilus's native LOCATIONS section with a LOCATIONS-driven architecture
+- Context menus on all sidebar locations (Computer, Home, Recent, Starred, Network, Trash): Open, Open in New Tab, Open in New Window, plus location-specific actions (Properties, File History Settings, Trash Settings, Empty Trash)
+- Sidebar visibility settings: per-location toggles to show or hide each entry in the location group (Home, Recent, Starred, Network, Trash)
+
+### UX
+- Settings: "Visibility" group renamed to "Panel visibility" for clarity
+- Settings: new "Sidebar visibility" group added after Panel visibility
+
 ## v0.6.0
 ### UX
 - make Computer button on sidebar compatible with native style and custom GTK4 CSS styles

@@ -44,6 +44,36 @@
       <description>How the Network Volumes group is displayed: visible, merged, or hidden</description>
     </key>
 
+    <key name="sidebar-show-home" type="b">
+      <default>true</default>
+      <summary>Show Home in the sidebar Computer group</summary>
+      <description>Show the Home place in the custom Computer group on the sidebar</description>
+    </key>
+
+    <key name="sidebar-show-recent" type="b">
+      <default>false</default>
+      <summary>Show Recent in the sidebar Computer group</summary>
+      <description>Show the Recent place in the custom Computer group on the sidebar</description>
+    </key>
+
+    <key name="sidebar-show-starred" type="b">
+      <default>false</default>
+      <summary>Show Starred in the sidebar Computer group</summary>
+      <description>Show the Starred place in the custom Computer group on the sidebar</description>
+    </key>
+
+    <key name="sidebar-show-network" type="b">
+      <default>false</default>
+      <summary>Show Network in the sidebar Computer group</summary>
+      <description>Show the Network place in the custom Computer group on the sidebar</description>
+    </key>
+
+    <key name="sidebar-show-trash" type="b">
+      <default>true</default>
+      <summary>Show Trash in the sidebar Computer group</summary>
+      <description>Show the Trash place in the custom Computer group on the sidebar</description>
+    </key>
+
     <key name="color-mode" type="s">
       <default>'accent'</default>
       <summary>Level bar color mode</summary>

@@ -388,6 +388,7 @@ PLACES: list[PlaceEntry] = [
         tooltip=_("Open recently used documents"),
         order_index=2,
         menu=_recent_context_menu,
+        visible=False,
     ),
     PlaceEntry(
         name="starred",
@@ -398,6 +399,7 @@ PLACES: list[PlaceEntry] = [
         tooltip=_("Open starred files"),
         order_index=3,
         menu=_open_only_context_menu,
+        visible=False,
     ),
     PlaceEntry(
         name="network",
@@ -408,6 +410,7 @@ PLACES: list[PlaceEntry] = [
         tooltip=_("Browse the network"),
         order_index=4,
         menu=_open_only_context_menu,
+        visible=False,
     ),
     PlaceEntry(
         name="trash",
@@ -420,6 +423,31 @@ PLACES: list[PlaceEntry] = [
         menu=_trash_context_menu,
     ),
 ]
+
+
+# Maps each place name to its GSettings key controlling sidebar visibility.
+# "computer" is intentionally absent -- it is always shown and has no toggle.
+_PLACE_VISIBILITY_KEYS: dict[str, str] = {
+    "home": "sidebar-show-home",
+    "recent": "sidebar-show-recent",
+    "starred": "sidebar-show-starred",
+    "network": "sidebar-show-network",
+    "trash": "sidebar-show-trash",
+}
+
+
+def _place_is_visible(entry: PlaceEntry, gsettings) -> bool:
+    """Whether a place should appear in the custom sidebar group.
+
+    Computer is always visible. Every other place is driven by its
+    sidebar-show-* GSettings key, falling back to the static default.
+    """
+    gskey = _PLACE_VISIBILITY_KEYS.get(entry.name)
+    if gskey is None:
+        return True
+    if gsettings is None:
+        return entry.visible
+    return gsettings.get_boolean(gskey)
 
 
 def _disk_context_menu(ext, win, m) -> ContextualMenu:
@@ -717,7 +745,7 @@ _CSS = b"""
 }
 """
 
-# Scoped tightly to #my_computer_places to avoid side effects elsewhere.
+# Scoped tightly to #nautilus_my_computer_section_locations to avoid side effects elsewhere.
 #
 # inner-wrapper mode: the two listboxes are direct siblings so the + combinator
 # fires. Both carry .navigation-sidebar so the theme's base padding (6px all sides)
@@ -729,10 +757,10 @@ _CSS = b"""
 # NautilusSidebarRow styles itself via .sidebar-revealer - no row/revealer
 # overrides needed here.
 _CSS_SIDEBAR = b"""
-#my_computer_places.navigation-sidebar {
+#nautilus_my_computer_section_locations.navigation-sidebar {
     padding-bottom: 0;
 }
-#my_computer_places.navigation-sidebar + .places-sidebar-list {
+#nautilus_my_computer_section_locations.navigation-sidebar + .places-sidebar-list {
     padding-top: 0;
 }
 """
@@ -899,7 +927,8 @@ def _apply_places_hide_css(native_listbox: Gtk.ListBox, display: object) -> None
         " font-size:0; -gtk-icon-size:0; opacity:0; border:none; }"
     )
     selectors = ",\n".join(
-        f"#my_computer_places + .places-sidebar-list > row:nth-child({n})" for n in indices
+        f"#nautilus_my_computer_section_locations + .places-sidebar-list > row:nth-child({n})"
+        for n in indices
     )
     css = f"{selectors}\n{hide_rule}\n".encode()
 
@@ -1756,6 +1785,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         elif key.startswith("visibility-"):
             # Grouping change only -- no rescan needed, just re-render
             self._repopulate_visible()
+        elif key.startswith("sidebar-show-"):
+            # Sidebar place toggle -- rebuild the custom places listbox in place
+            GLib.idle_add(self._rebuild_sidebar_places)
 
     def _apply_bar_color(self) -> None:
         if not self._gsettings or self._bar_css_display is None:
@@ -2682,9 +2714,15 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                     flow.unselect_all()
                 state["_deselecting"] = False
                 state["selected_key"] = None
-            sidebar_lb = state.get("sidebar_listbox")
-            if sidebar_lb and not state.get("sidebar_native"):
-                GLib.idle_add(lambda lb=sidebar_lb: lb.unselect_all() or False)
+            # Re-derive our sidebar highlight from the aggregate native selection
+            # rather than blindly unselecting. The Computer row is selected
+            # manually on entry (no live native row to mirror), so on exit nothing
+            # fires a native signal to clear it. Re-running the mirror sync clears
+            # our row when the destination (e.g. /tmp/) is not one of our places,
+            # and leaves it intact when the mirror already picked an owned place.
+            sync = state.get("sidebar_sync")
+            if callable(sync):
+                GLib.idle_add(lambda s=sync: (s(), False)[1])
             if not self._set_visible_view(state, VIEW_FILES, "title changed show files"):
                 return
             self._stop_usage_poll_if_idle()
@@ -3116,7 +3154,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         gen_group.add(start_row)
 
         vis_group = Adw.PreferencesGroup()
-        vis_group.set_title(_("Visibility"))
+        vis_group.set_title(_("Panel visibility"))
         vis_group.set_description(
             _(
                 "Choose how each group appears. "
@@ -3155,6 +3193,24 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             "show-system-partitions", show_sys_parts_row, "active", Gio.SettingsBindFlags.DEFAULT
         )
         vis_group.add(show_sys_parts_row)
+
+        sidebar_vis_group = Adw.PreferencesGroup()
+        sidebar_vis_group.set_title(_("Sidebar visibility"))
+        sidebar_vis_group.set_description(_("Choose which locations appear on the sidebar."))
+        page.add(sidebar_vis_group)
+
+        # One toggle per location, skipping Computer (always shown, no key).
+        for entry in PLACES:
+            gskey = _PLACE_VISIBILITY_KEYS.get(entry.name)
+            if gskey is None:
+                continue
+            place_row = Adw.SwitchRow()
+            place_row.set_title(entry.label)
+            icon_img = Gtk.Image.new_from_icon_name(entry.icon)
+            icon_img.set_icon_size(Gtk.IconSize.NORMAL)
+            place_row.add_prefix(icon_img)
+            self._gsettings.bind(gskey, place_row, "active", Gio.SettingsBindFlags.DEFAULT)
+            sidebar_vis_group.add(place_row)
 
         color_group = Adw.PreferencesGroup()
         color_group.set_title(_("Bar Color"))
@@ -3397,34 +3453,141 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         self, win: Gtk.Window, nautilus_sidebar: Gtk.Widget | None = None
     ) -> Gtk.ListBox:
         our_listbox = Gtk.ListBox()
-        our_listbox.set_name("my_computer_places")
+        our_listbox.set_name("nautilus_my_computer_section_locations")
         our_listbox.add_css_class("navigation-sidebar")
         our_listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
 
-        row_uris: dict[Gtk.ListBoxRow, str] = {}
-        for entry in [p for p in PLACES if p.visible]:
-            row = self._build_place_sidebar_row(win, entry, nautilus_sidebar)
-            our_listbox.append(row)
-            row_uris[row] = entry.uri
+        # row -> uri map kept on the listbox so the row-activated handler and
+        # later rebuilds (on sidebar-show-* changes) share the same dict.
+        our_listbox._row_uris = {}
+        self._populate_places_listbox(win, our_listbox, nautilus_sidebar)
 
         our_listbox.connect(
             "row-activated",
-            lambda _lb, row, ru=row_uris: self._navigate_to(ru.get(row, DISKS_URI), win),
+            lambda lb, row: self._navigate_to(lb._row_uris.get(row, DISKS_URI), win),
         )
         return our_listbox
 
-    def _wire_sidebar_cross_deselect(
-        self, our_listbox: Gtk.ListBox, native_listbox: Gtk.ListBox
+    def _populate_places_listbox(
+        self,
+        win: Gtk.Window,
+        our_listbox: Gtk.ListBox,
+        nautilus_sidebar: Gtk.Widget | None = None,
     ) -> None:
-        our_listbox.connect(
-            "row-selected",
-            lambda _lb, row: native_listbox.unselect_all() if row else None,
-        )
-        native_listbox.connect(
-            "row-selected",
-            lambda _lb, row: our_listbox.unselect_all() if row else None,
-        )
-        _log("_inject_sidebar_link: cross-deselect wired ✓")
+        """(Re)build the rows of the custom places listbox from current settings.
+
+        Computer is always first; every other place is included only when its
+        sidebar-show-* setting is enabled.
+        """
+        row_uris: dict[Gtk.ListBoxRow, str] = {}
+        for entry in [p for p in PLACES if _place_is_visible(p, self._gsettings)]:
+            row = self._build_place_sidebar_row(win, entry, nautilus_sidebar)
+            our_listbox.append(row)
+            row_uris[row] = entry.uri
+        our_listbox._row_uris = row_uris
+
+    def _rebuild_sidebar_places(self) -> bool:
+        """Rebuild every window's custom places listbox in place after a
+        sidebar-show-* setting change. Clears the existing rows and repopulates
+        from the current settings, preserving the listbox widget (so the
+        row-activated handler and cross-deselect wiring stay intact)."""
+        for win, state in list(self._windows.items()):
+            our_listbox = state.get("sidebar_listbox")
+            if our_listbox is None or state.get("sidebar_native"):
+                continue
+            child = our_listbox.get_first_child()
+            while child is not None:
+                nxt = child.get_next_sibling()
+                our_listbox.remove(child)
+                child = nxt
+            nautilus_sidebar = state.get("sidebar_native_widget")
+            self._populate_places_listbox(win, our_listbox, nautilus_sidebar)
+            state["sidebar_row"] = our_listbox.get_row_at_index(0)
+            # Re-select the Computer row if the panel is currently shown.
+            if state.get("visible_view") == VIEW_DISKINFO:
+                row = our_listbox.get_row_at_index(0)
+                if row is not None:
+                    our_listbox.select_row(row)
+        return GLib.SOURCE_REMOVE
+
+    def _wire_sidebar_cross_deselect(
+        self,
+        win: Gtk.Window,
+        our_listbox: Gtk.ListBox,
+        native_listbox: Gtk.ListBox,
+        nautilus_sidebar: Gtk.Widget | None = None,
+    ) -> None:
+        # Native listboxes are the source of truth for selection state. We
+        # mirror them: whenever any native section (Places, Devices, Bookmarks…)
+        # changes its selection, we re-derive our highlight from the *aggregate*
+        # native state - the URI currently selected across all native listboxes.
+        # If that URI matches one of our places, select our matching row;
+        # otherwise deselect ours. We never push back to native - that would
+        # create a signal loop.
+        #
+        # Reacting to the aggregate (not the single signal's row argument) is
+        # essential: a row-selected(None) fires transiently while navigating
+        # between two places, and acting on it alone would wrongly clear our
+        # selection. Scanning all listboxes for the real current selection makes
+        # the mirror order-independent and robust to those transient deselects.
+        connected: list[Gtk.ListBox] = []
+        for lb in [native_listbox] + (
+            [
+                w
+                for w in _all_widgets(nautilus_sidebar)
+                if isinstance(w, Gtk.ListBox) and w is not our_listbox
+            ]
+            if nautilus_sidebar is not None
+            else []
+        ):
+            if not any(lb is c for c in connected):
+                connected.append(lb)
+
+        _mirroring: list[bool] = [False]
+
+        def _current_native_uri() -> str | None:
+            for lb in connected:
+                sel = lb.get_selected_row()
+                if sel is None:
+                    continue
+                try:
+                    uri = sel.get_property("uri")
+                except Exception:
+                    uri = None
+                if uri:
+                    return uri
+            return None
+
+        def _sync_from_native(*_args):
+            if _mirroring[0]:
+                return
+            native_uri = _current_native_uri()
+            uri_to_our_row = {v: k for k, v in (our_listbox._row_uris or {}).items()}
+            our_row = uri_to_our_row.get(native_uri) if native_uri else None
+            _mirroring[0] = True
+            try:
+                if our_row is not None:
+                    if our_listbox.get_selected_row() is not our_row:
+                        our_listbox.select_row(our_row)
+                elif our_listbox.get_selected_row() is not None:
+                    our_listbox.unselect_all()
+            finally:
+                _mirroring[0] = False
+
+        for lb in connected:
+            lb.connect("row-selected", _sync_from_native)
+
+        # Expose the sync so _on_title_changed can re-derive our highlight when
+        # leaving the computer view. The Computer row has no live native row to
+        # mirror (the native one is hidden and Nautilus never selects it), so it
+        # is selected manually on entry; on exit nothing fires a native signal,
+        # and this lets us re-check the aggregate native state to clear it when
+        # the destination (e.g. /tmp/) is not one of our places.
+        state = self._windows.get(win)
+        if state is not None:
+            state["sidebar_sync"] = _sync_from_native
+
+        _log(f"_inject_sidebar_link: mirror-select wired to {len(connected)} listbox(es) ✓")
 
     def _wire_native_row_gap(self, our_listbox: Gtk.ListBox, native_listbox: Gtk.ListBox) -> None:
         # Measure the actual pixel gap between the first two native sidebar rows
@@ -3620,6 +3783,32 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         native_listbox.connect("row-activated", _on_row_activated)
 
+        # Cross-deselect across all native sidebar sections. Nautilus uses a
+        # separate GtkListBox per section (Places, Devices, Bookmarks…); GTK
+        # does not deselect across listboxes automatically, so two sections can
+        # appear selected at once. Wire every listbox so that a selection in one
+        # clears all others.
+        _deselecting: list[bool] = [False]
+        all_lbs = list(
+            {
+                id(w): w for w in _all_widgets(nautilus_sidebar) if isinstance(w, Gtk.ListBox)
+            }.values()
+        )
+
+        def _on_any_lb_selected(selected_lb, row):
+            if _deselecting[0] or row is None:
+                return
+            _deselecting[0] = True
+            try:
+                for lb in all_lbs:
+                    if lb is not selected_lb:
+                        lb.unselect_all()
+            finally:
+                _deselecting[0] = False
+
+        for lb in all_lbs:
+            lb.connect("row-selected", _on_any_lb_selected)
+
         state = self._windows.get(win)
         if state is not None:
             state["sidebar_listbox"] = native_listbox
@@ -3644,13 +3833,13 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         native_listbox.add_css_class("places-sidebar-list")
 
         wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        wrapper.set_name("my_computer_sidebar_wrapper")
+        wrapper.set_name("nautilus_my_computer_sidebar_wrapper")
         wrapper.set_margin_bottom(0)
         native_scrolled_window.set_child(wrapper)
         wrapper.append(our_listbox)
         wrapper.append(native_listbox)
 
-        self._wire_sidebar_cross_deselect(our_listbox, native_listbox)
+        self._wire_sidebar_cross_deselect(win, our_listbox, native_listbox, nautilus_sidebar)
         self._wire_native_row_gap(our_listbox, native_listbox)
         _apply_places_hide_css(native_listbox, win.get_display())
 
@@ -3659,6 +3848,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             state["sidebar_listbox"] = our_listbox
             state["sidebar_row"] = our_listbox.get_row_at_index(0)
             state["sidebar_native"] = False
+            state["sidebar_native_widget"] = nautilus_sidebar
             state["sidebar_mode"] = "inner-wrapper"
 
         _log("_inject_sidebar_link: inner wrapper set inside native scrolled window ✓")
@@ -3809,15 +3999,17 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             native_listbox.add_css_class("places-sidebar-list")
             _apply_places_hide_css(native_listbox, win.get_display())
 
-        # Cross-deselect: selecting in one listbox clears the other so only
-        # one row appears selected across both groups at any time.
+        # Mirror: native listboxes drive our selection so only one row appears
+        # highlighted across all sidebar sections at any time.
         if native_listbox is not None:
-            self._wire_sidebar_cross_deselect(our_listbox, native_listbox)
+            self._wire_sidebar_cross_deselect(win, our_listbox, native_listbox, nautilus_sidebar)
 
         state = self._windows.get(win)
         if state is not None:
             state["sidebar_listbox"] = our_listbox
             state["sidebar_row"] = our_listbox.get_row_at_index(0)
+            state["sidebar_native"] = False
+            state["sidebar_native_widget"] = nautilus_sidebar
             state["sidebar_mode"] = "outer-wrapper"
 
         _log("_inject_sidebar_link: outer scroll wrapper set as content ✓")

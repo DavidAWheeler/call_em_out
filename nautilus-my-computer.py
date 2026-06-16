@@ -5,6 +5,7 @@ import re
 import subprocess
 import threading
 import time
+import weakref
 
 import gi
 
@@ -257,7 +258,7 @@ PLACES: list[PlaceEntry] = [
         name="network",
         position=4,
         label=_("Network"),
-        icon="network-workgroup-symbolic",
+        icon="network-computer-symbolic",
         uri="x-network-view:///",
         tooltip=_("Browse the network"),
         order_index=4,
@@ -519,6 +520,132 @@ def _log(msg: str) -> None:
 
 
 _places_hide_provider: Gtk.CssProvider | None = None
+
+# Native sidebar row data read before hiding: {uri: {"label": str, "tooltip": str, "icon": str}}
+_native_place_data: dict[str, dict] = {}
+
+# Weak references to trash sidebar rows, across all windows. We own these rows
+# (Nautilus does not manage them), so we drive their icon via the row's own
+# start-icon property instead of hunting for the inner Gtk.Image.
+# Updated by _update_trash_icon() when trash state changes.
+_trash_rows: list[weakref.ref] = []
+_trash_monitor: Gio.FileMonitor | None = None
+_trash_full: bool = False
+
+
+def _register_trash_row(row: Gtk.ListBoxRow) -> None:
+    _trash_rows.append(weakref.ref(row))
+    # Apply the current state immediately so a freshly built row is correct.
+    _apply_trash_icon_to_row(row, _trash_full)
+
+
+def _apply_trash_icon_to_row(row: Gtk.ListBoxRow, full: bool) -> None:
+    icon = "user-trash-full-symbolic" if full else "user-trash-symbolic"
+    # NautilusSidebarRow: set its start-icon property; it owns its inner image.
+    try:
+        row.set_property("start-icon", Gio.ThemedIcon.new(icon))
+        return
+    except Exception:
+        pass
+    # Fallback GtkListBoxRow path: find the non-button Gtk.Image and repin it.
+    for w in _all_widgets(row):
+        if not isinstance(w, Gtk.Image):
+            continue
+        parent = w.get_parent()
+        in_button = False
+        while parent and parent is not row:
+            if isinstance(parent, Gtk.Button):
+                in_button = True
+                break
+            parent = parent.get_parent()
+        if not in_button:
+            _repin_icon(w, icon)
+            break
+
+
+def _update_trash_icon(full: bool) -> None:
+    global _trash_full
+    _trash_full = full
+    dead = []
+    for ref in _trash_rows:
+        row = ref()
+        if row is None:
+            dead.append(ref)
+        else:
+            _apply_trash_icon_to_row(row, full)
+    for ref in dead:
+        _trash_rows.remove(ref)
+
+
+_TRASH_FILES_PATH = os.path.join(GLib.get_home_dir(), ".local", "share", "Trash", "files")
+
+
+def _check_trash_state() -> None:
+    try:
+        full = bool(os.listdir(_TRASH_FILES_PATH))
+    except OSError:
+        full = False
+    _log(f"_check_trash_state: full={full}")
+    _update_trash_icon(full)
+
+
+def _start_trash_monitor() -> None:
+    global _trash_monitor
+    if _trash_monitor is not None:
+        return
+    try:
+        os.makedirs(_TRASH_FILES_PATH, exist_ok=True)
+        gfile = Gio.File.new_for_path(_TRASH_FILES_PATH)
+        _trash_monitor = gfile.monitor_directory(Gio.FileMonitorFlags.NONE, None)
+        _trash_monitor.connect(
+            "changed",
+            lambda *args: _log(f"trash monitor fired event={args[-1]}") or _check_trash_state(),
+        )
+        _check_trash_state()  # seed _trash_full so later-built rows render correctly
+        _log(f"_start_trash_monitor: watching {_TRASH_FILES_PATH}")
+    except Exception as e:
+        _log(f"_start_trash_monitor: failed ({e})")
+
+
+def _read_native_place_data(native_listbox: Gtk.ListBox) -> None:
+    """Scan native sidebar rows and cache their label, tooltip, and icon name.
+    Call this BEFORE building custom rows so _build_place_sidebar_row can use
+    the native translated strings and exact icon names."""
+    place_uris = {p.uri for p in PLACES}
+    idx = 0
+    while (row := native_listbox.get_row_at_index(idx)) is not None:
+        try:
+            uri = row.get_property("uri")
+        except Exception:
+            uri = None
+        if uri in place_uris:
+            label = tooltip = icon_name = None
+            try:
+                label = row.get_property("label")
+            except Exception:
+                pass
+            try:
+                tooltip = row.get_property("tooltip")
+            except Exception:
+                pass
+            try:
+                gicon = row.get_property("start-icon")
+                if isinstance(gicon, Gio.ThemedIcon):
+                    names = gicon.get_names()
+                    icon_name = names[0] if names else None
+            except Exception:
+                pass
+            entry: dict = {}
+            if label:
+                entry["label"] = label
+            if tooltip:
+                entry["tooltip"] = tooltip
+            if icon_name:
+                entry["icon"] = icon_name
+            if entry:
+                _native_place_data[uri] = entry
+                _log(f"_read_native_place_data: {uri} -> label={label!r} icon={icon_name!r}")
+        idx += 1
 
 
 def _apply_places_hide_css(native_listbox: Gtk.ListBox, display: object) -> None:
@@ -979,25 +1106,32 @@ def _pin_icon(img: Gtk.Image, icon_name: str) -> None:
     that case.  A simple boolean flag prevents re-entrance (handler_block_by_func
     has cross-signal edge-cases when one function is connected to multiple
     signals simultaneously).
+
+    The target icon is stored as img._diskinfo_pin_name so _repin_icon() can
+    update it without reconnecting signal handlers.
     """
+    img._diskinfo_pin_name = icon_name
     img.set_from_icon_name(icon_name)
     img.set_visible(True)
     if getattr(img, "_diskinfo_pinned", False):
-        return  # already watching
+        return  # already watching — _diskinfo_pin_name update above is enough
     img._diskinfo_pinned = True
     img._diskinfo_restoring = False
 
     def _on_changed(image: Gtk.Image, _pspec) -> None:
         if image._diskinfo_restoring:
             return  # we triggered this notification ourselves – skip
+        target = getattr(image, "_diskinfo_pin_name", None)
+        if target is None:
+            return
         # Detect overwrite: storage type not ICON_NAME, wrong name, or visibility dropped.
         if (
             getattr(image, "get_storage_type", lambda: None)() != Gtk.ImageType.ICON_NAME
-            or image.get_icon_name() != icon_name
+            or image.get_icon_name() != target
             or not image.get_visible()
         ):
             image._diskinfo_restoring = True
-            image.set_from_icon_name(icon_name)
+            image.set_from_icon_name(target)
             image.set_visible(True)
             image._diskinfo_restoring = False
 
@@ -1006,6 +1140,17 @@ def _pin_icon(img: Gtk.Image, icon_name: str) -> None:
     img.connect("notify::paintable", _on_changed)
     img.connect("notify::storage-type", _on_changed)
     img.connect("notify::visible", _on_changed)
+
+
+def _repin_icon(img: Gtk.Image, icon_name: str) -> None:
+    """Change the pinned icon target on an already-pinned Gtk.Image.
+    The existing signal handlers read _diskinfo_pin_name dynamically, so
+    updating the attribute and setting the new icon is all that is needed."""
+    img._diskinfo_pin_name = icon_name
+    img._diskinfo_restoring = True
+    img.set_from_icon_name(icon_name)
+    img.set_visible(True)
+    img._diskinfo_restoring = False
 
 
 class LeftClamp(Gtk.Widget):
@@ -1129,6 +1274,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         # Kick off async network:/// discovery immediately
         _refresh_network_places(on_done=self._do_live_refresh)
+
+        _start_trash_monitor()
 
         self._watch_bookmarks_file()
 
@@ -3158,6 +3305,12 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
     def _build_place_sidebar_row(
         self, win: Gtk.Window, entry: PlaceEntry, nautilus_sidebar: Gtk.Widget | None = None
     ) -> Gtk.ListBoxRow:
+        # Prefer native sidebar row data (already translated, exact icon) over our defaults.
+        native = _native_place_data.get(entry.uri, {})
+        row_label = native.get("label", entry.label)
+        row_tooltip = native.get("tooltip", entry.tooltip)
+        icon_name = native.get("icon", entry.icon)
+
         # Try to instantiate NautilusSidebarRow directly from the Nautilus GObject
         # type system. It is registered at runtime when Nautilus loads, so
         # GObject.type_from_name() can find it. uri is construct-only.
@@ -3169,10 +3322,10 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                 "place-type": 0,  # NAUTILUS_SIDEBAR_ROW_INVALID, sorts before built-in rows
                 "section-type": 1,  # NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS
                 "order-index": entry.order_index,
-                "label": entry.label,
-                "tooltip": entry.tooltip,
+                "label": row_label,
+                "tooltip": row_tooltip,
                 "eject-tooltip": _("Unmount"),
-                "start-icon": Gio.ThemedIcon.new(entry.icon),
+                "start-icon": Gio.ThemedIcon.new(icon_name),
             }
             if nautilus_sidebar is not None:
                 row_props["sidebar"] = nautilus_sidebar
@@ -3192,41 +3345,47 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             list_row.set_name(f"place_{entry.name}")
             row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
             row_box.set_name(f"place_{entry.name}_box")
-            icon = Gtk.Image.new_from_icon_name(entry.icon)
-            icon.set_name(f"place_{entry.name}_icon")
-            icon.add_css_class("sidebar-icon")
-            icon.set_icon_size(Gtk.IconSize.NORMAL)
-            label = Gtk.Label(label=entry.label)
-            label.set_name(f"place_{entry.name}_label")
-            label.add_css_class("sidebar-label")
-            label.set_xalign(0.0)
-            label.set_hexpand(True)
-            label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
-            row_box.append(icon)
-            row_box.append(label)
+            icon_img = Gtk.Image.new_from_icon_name(icon_name)
+            icon_img.set_name(f"place_{entry.name}_icon")
+            icon_img.add_css_class("sidebar-icon")
+            icon_img.set_icon_size(Gtk.IconSize.NORMAL)
+            lbl = Gtk.Label(label=row_label)
+            lbl.set_name(f"place_{entry.name}_label")
+            lbl.add_css_class("sidebar-label")
+            lbl.set_xalign(0.0)
+            lbl.set_hexpand(True)
+            lbl.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+            row_box.append(icon_img)
+            row_box.append(lbl)
             list_row.set_child(row_box)
 
         list_row.add_css_class("activatable")
 
-        icon_name = entry.icon
+        is_trash = entry.name == "trash"
 
-        def _pin_row_icon():
-            for w in _all_widgets(list_row):
-                if not isinstance(w, Gtk.Image):
-                    continue
-                parent = w.get_parent()
-                in_button = False
-                while parent and parent is not list_row:
-                    if isinstance(parent, Gtk.Button):
-                        in_button = True
+        if is_trash:
+            # We own this row; drive its icon via start-icon, kept in sync with the
+            # live trash state. No inner-image pinning (it would fight the updates).
+            _register_trash_row(list_row)
+        else:
+
+            def _pin_row_icon():
+                for w in _all_widgets(list_row):
+                    if not isinstance(w, Gtk.Image):
+                        continue
+                    parent = w.get_parent()
+                    in_button = False
+                    while parent and parent is not list_row:
+                        if isinstance(parent, Gtk.Button):
+                            in_button = True
+                            break
+                        parent = parent.get_parent()
+                    if not in_button:
+                        _pin_icon(w, icon_name)
                         break
-                    parent = parent.get_parent()
-                if not in_button:
-                    _pin_icon(w, icon_name)
-                    break
-            return GLib.SOURCE_REMOVE
+                return GLib.SOURCE_REMOVE
 
-        GLib.idle_add(_pin_row_icon)
+            GLib.idle_add(_pin_row_icon)
 
         # Right-click context menu: Computer entry only.
         if entry.name == "computer":
@@ -3337,6 +3496,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         native_listbox: Gtk.ListBox,
         nautilus_sidebar: Gtk.Widget | None = None,
     ) -> bool:
+        _read_native_place_data(native_listbox)
         our_listbox = self._build_places_sidebar_listbox(win, nautilus_sidebar)
         native_listbox.add_css_class("places-sidebar-list")
 
@@ -3474,6 +3634,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             else:
                 _log("_inject_sidebar_link: native listbox unavailable, using outer wrapper")
 
+        if native_listbox is not None:
+            _read_native_place_data(native_listbox)
         our_listbox = self._build_places_sidebar_listbox(win, nautilus_sidebar)
 
         wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)

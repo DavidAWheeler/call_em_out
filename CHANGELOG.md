@@ -24,7 +24,7 @@ All notable changes to this project are documented here.
 ### Added
 - Custom Location group on the sidebar, replacing Nautilus's native LOCATIONS section with a LOCATIONS-driven architecture
 - Context menus on all sidebar locations (Computer, Home, Recent, Starred, Network, Trash): Open, Open in New Tab, Open in New Window, plus location-specific actions (Properties, File History Settings, Trash Settings, Empty Trash)
-- Sidebar visibility settings: per-location toggles to show or hide each entry in the location group (Home, Recent, Starred, Network, Trash)
+- Sidebar visibility settings: per-location toggles to show or hide each entry in the location group (Home, Recent, Starred, Network, Trash) (credit @Aeternitae, issue #18)
 
 ### UX
 - Settings: "Visibility" group renamed to "Panel visibility" for clarity

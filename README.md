@@ -42,7 +42,8 @@ My Computer Settings let you:
 
 - Open GNOME Files directly on the Computer view at startup
 - Show or hide system partitions (root, boot, EFI, swap)
-- Control the visibility of each group - visible, hidden, or merged into On this Computer
+- Control the visibility of each group: visible, hidden, or merged into On this Computer
+- Choose which sidebar locations are shown: Home, Recent, Starred, Network, Trash
 - Customize the disk usage bar color to match your style
 
 ![Settings Page](assets/images/settings-page.png)
@@ -69,6 +70,20 @@ Make the **My Computer** view your own, and organize it to show only what matter
 
 ![Groups Visibility](assets/images/groups-visibility.png)
 
+## Sidebar visibility
+
+The default GNOME Files sidebar shows every built-in location whether you use it or not. My Computer gives you the visibility control of each one, so you can keep only what you actually need.
+
+- **Home**
+- **Recent**
+- **Starred**
+- **Network**
+- **Trash**
+
+**Computer** is always shown, it's the whole point of the extension. Everything else is up to you, turn off what you never use and your sidebar stays short and clean.
+
+![Sidebar Visibility](assets/images/sidebar-visibility.png)
+
 ## Style
 
 ### Color mode for disk usage bars
@@ -87,9 +102,13 @@ The panel follows GNOME's light/dark preference natively, with no extra configur
 
 ![Light and dark mode](assets/images/light-and-dark-mode.png)
 
-### GNOME icon theme
+### GNOME icon themes
 
 All icons are native GNOME icons. My Computer works with any custom icon theme.
+
+### GNOME GTK themes
+
+My Computer is compatible with almost all custom GTK themes.
 
 ## Features
 
@@ -101,7 +120,8 @@ All icons are native GNOME icons. My Computer works with any custom icon theme.
 - **Customizable bars:** choose between GNOME accent color, a custom color, or a custom gradient for the usage bars.
 - **Start on My Computer:** choose to open GNOME Files directly on the My Computer panel every time.
 - **Right-click context menu:** open, open in new tab, open in new window, mount, unmount, and eject volumes directly from a native-feel context menu.
-- **Groups visibility:** choose which storage groups are visible, hidden, or merged into one flat list - directly from the right-click menu on the Computer button.
+- **Groups visibility:** choose which storage groups are visible, hidden, or merged into one flat list.
+- **Sidebar visibility:** choose which sidebar locations are shown: Home, Recent, Starred, Network, and Trash.
   
 ## Tested on
 

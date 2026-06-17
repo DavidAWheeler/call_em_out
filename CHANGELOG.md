@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.7.2
+### Docs
+- Updated README and new content and screenshots/visuals
+
+---
+
 ## v0.7.1
 ### Added
 - Drag-and-drop visual feedback on sidebar places: rows that aren't valid drop destinations grey out while a file drag is over the sidebar, matching native Nautilus behaviour

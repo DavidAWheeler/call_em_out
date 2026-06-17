@@ -86,7 +86,7 @@ DEBUG_SELFTEST = _flag("MC_SELFTEST", default=False)  # in-process navigation se
 
 # ── Extension metadata (keep in sync with pyproject.toml) ────────────────────
 EXT_NAME = "My Computer for Nautilus"
-EXT_VERSION = "0.7.0"
+EXT_VERSION = "0.7.1"
 EXT_AUTHOR = "Yann Masoch"
 EXT_LICENSE = "MIT"
 EXT_GITHUB = "https://github.com/yannmasoch/nautilus-my-computer"
@@ -211,6 +211,20 @@ _INTERNAL_FSTYPES = {"gvfs", "unmounted", "network-place"}
 # Mountpoint prefixes that indicate removable / external media
 EXTERNAL_PREFIXES = ("/media/", "/run/media/", "/mnt/")
 
+# Sidebar place URIs that never accept a file drop, mirroring Nautilus'
+# check_valid_drop_target (recent:/// is hardcoded invalid) and its
+# drag_open_exclusion_list. Used to grey native rows during a drag when the
+# pointer is over our own listbox (Nautilus only dims its own rows while its
+# list_box is hovered).
+_SIDEBAR_DROP_EXCLUDED_URIS = frozenset(
+    {
+        "recent:///",
+        "starred:///",
+        DISKS_URI,
+        "x-network-view:///",
+    }
+)
+
 
 @dataclasses.dataclass
 class MenuItem:
@@ -287,6 +301,7 @@ class PlaceEntry:
     tooltip: str = ""
     order_index: int = 0  # passed to NautilusSidebarRow "order-index" property
     menu: object = None  # factory menu(ext, win, entry) -> ContextualMenu, or None for no menu
+    droppable: bool = False  # accepts file drops (copy/move destination)
 
 
 def _open_actions(ext, win, uri: str, open_enabled: bool = True) -> list:
@@ -378,6 +393,7 @@ PLACES: list[PlaceEntry] = [
         tooltip=_("Open your personal folder"),
         order_index=1,
         menu=_home_context_menu,
+        droppable=True,
     ),
     PlaceEntry(
         name="recent",
@@ -2783,16 +2799,36 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
     ) -> bool:
         if not m.is_mounted:
             return False
-        files = list(value.get_files())
-        if not files:
-            return False
-        sources = [f.get_uri() for f in files]
         if m.mountpoint:
             destination = Gio.File.new_for_path(m.mountpoint).get_uri()
         else:
             destination = m.nav_uri
+        return self._drop_files_to_destination(target, value, destination, win)
+
+    def _on_place_files_dropped(
+        self,
+        target: Gtk.DropTarget,
+        value: Gdk.FileList,
+        x: float,
+        y: float,
+        destination: str,
+        win: Gtk.Window,
+    ) -> bool:
+        return self._drop_files_to_destination(target, value, destination, win)
+
+    def _drop_files_to_destination(
+        self,
+        target: Gtk.DropTarget,
+        value: Gdk.FileList,
+        destination: str,
+        win: Gtk.Window,
+    ) -> bool:
         if not destination:
             return False
+        files = list(value.get_files())
+        if not files:
+            return False
+        sources = [f.get_uri() for f in files]
         use_move = getattr(target, "_last_action", Gdk.DragAction.COPY) == Gdk.DragAction.MOVE
         method = "MoveURIs" if use_move else "CopyURIs"
         self._nautilus_file_op(method, sources, destination, win)
@@ -3468,6 +3504,99 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         )
         return our_listbox
 
+    def _wire_sidebar_drop_dimming(
+        self, area: Gtk.Widget, our_listbox: Gtk.ListBox, native_listbox: Gtk.ListBox | None
+    ) -> None:
+        """Mirror Nautilus' own sidebar behaviour (nautilus-sidebar.c
+        update_possible_drop_targets): while a drag is anywhere over the
+        sidebar, desensitize rows that aren't valid file-drop destinations so
+        they gray out like native rows. Restore sensitivity once the drag
+        leaves.
+
+        Nautilus dims its own native rows only while the pointer is over its
+        own list_box; if a drag starts in (or stays in) our separate listbox,
+        the native rows never gray. So we replicate Nautilus' validity check
+        on the native rows ourselves too, keeping both groups consistent. We
+        only grey the rows Nautilus itself treats as invalid for a file drag
+        (recent:/// is hardcoded invalid in check_valid_drop_target); drives,
+        bookmarks, Home and Trash stay droppable. Our own rows use the
+        per-place `_droppable` flag. `area` is the shared wrapper covering
+        both groups, so the drag is caught even when it starts directly over
+        a child without crossing `area`'s own border.
+        """
+
+        def _native_row_droppable(row: Gtk.ListBoxRow) -> bool:
+            # Mirror nautilus-sidebar.c check_valid_drop_target for a file drag:
+            # a row is NOT a valid drop target (gets greyed) when its uri is
+            # NULL/empty - which is the case for unmounted volumes ("uri may be
+            # NULL for unmounted volumes ... we don't allow drops there") - or
+            # when it is one of the schemes that never accept a file drop
+            # (recent://, starred://, computer://, x-network-view://). Mounted
+            # writable locations (file://, smb://, trash://) stay droppable.
+            try:
+                uri = row.get_property("uri")
+            except (TypeError, ValueError):
+                return True
+            if not uri:
+                return False
+            return uri not in _SIDEBAR_DROP_EXCLUDED_URIS
+
+        def _set_dimmed(dimmed: bool) -> None:
+            for row in getattr(our_listbox, "_row_uris", {}):
+                row.set_sensitive(not dimmed or getattr(row, "_droppable", False))
+            if native_listbox is not None:
+                child = native_listbox.get_first_child()
+                while child is not None:
+                    if isinstance(child, Gtk.ListBoxRow):
+                        child.set_sensitive(not dimmed or _native_row_droppable(child))
+                    child = child.get_next_sibling()
+
+        # Gtk.DropControllerMotion (unlike Gtk.DropTarget/DropTargetAsync) never
+        # claims or negotiates the drag, so it is safe to stack on top of
+        # Nautilus' own Gtk.DropTarget without disturbing its hover-to-open.
+        #
+        # The controller's enter/leave bounce as the pointer descends into a
+        # child whose own Gtk.DropTarget claims the Gdk.Drop (notably
+        # native_listbox), which would flicker the dimming off. We can't simply
+        # un-dim on every leave (it fires constantly while moving between rows),
+        # nor latch only on drag-end (then it never clears when the drag leaves
+        # the sidebar but keeps going elsewhere). So: dim on enter/motion, and
+        # on leave re-check `contains_pointer` on idle - a transient child
+        # boundary still reports the pointer as contained, a real sidebar exit
+        # does not. A drag-end safety net clears the dimming if the drag is
+        # dropped/cancelled outside the sidebar entirely.
+        drag_state = {"drag": None}
+
+        def _undim(*_a):
+            drag_state["drag"] = None
+            _set_dimmed(False)
+
+        def _on_enter(controller, *_a):
+            _set_dimmed(True)
+            if drag_state["drag"] is not None:
+                return
+            drop = controller.get_drop()
+            drag = drop.get_drag() if drop is not None else None
+            if drag is None:
+                return
+            drag_state["drag"] = drag
+            drag.connect("dnd-finished", _undim)
+            drag.connect("cancel", lambda *_a: _undim())
+
+        def _on_leave(controller, *_a):
+            def _check():
+                if not controller.contains_pointer():
+                    _set_dimmed(False)
+                return GLib.SOURCE_REMOVE
+
+            GLib.idle_add(_check)
+
+        motion = Gtk.DropControllerMotion.new()
+        motion.connect("enter", _on_enter)
+        motion.connect("motion", lambda *_a: _set_dimmed(True))
+        motion.connect("leave", _on_leave)
+        area.add_controller(motion)
+
     def _populate_places_listbox(
         self,
         win: Gtk.Window,
@@ -3482,6 +3611,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         row_uris: dict[Gtk.ListBoxRow, str] = {}
         for entry in [p for p in PLACES if _place_is_visible(p, self._gsettings)]:
             row = self._build_place_sidebar_row(win, entry, nautilus_sidebar)
+            row._droppable = entry.droppable
             our_listbox.append(row)
             row_uris[row] = entry.uri
         our_listbox._row_uris = row_uris
@@ -3747,6 +3877,13 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             right_click.connect("pressed", _on_place_right_clicked)
             list_row.add_controller(right_click)
 
+        # Accept file drops only on places marked as valid copy/move destinations.
+        if entry.droppable:
+            drop = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
+            drop.connect("motion", self._on_drop_motion)
+            drop.connect("drop", self._on_place_files_dropped, entry.uri, win)
+            list_row.add_controller(drop)
+
         # Hide the eject button - not applicable for our injected entries.
         btn = _find_widget(list_row, buildable_id="eject_button")
         if isinstance(btn, Gtk.Button):
@@ -3841,6 +3978,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         self._wire_sidebar_cross_deselect(win, our_listbox, native_listbox, nautilus_sidebar)
         self._wire_native_row_gap(our_listbox, native_listbox)
+        self._wire_sidebar_drop_dimming(wrapper, our_listbox, native_listbox)
         _apply_places_hide_css(native_listbox, win.get_display())
 
         state = self._windows.get(win)
@@ -4003,6 +4141,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         # highlighted across all sidebar sections at any time.
         if native_listbox is not None:
             self._wire_sidebar_cross_deselect(win, our_listbox, native_listbox, nautilus_sidebar)
+
+        self._wire_sidebar_drop_dimming(wrapper, our_listbox, native_listbox)
 
         state = self._windows.get(win)
         if state is not None:

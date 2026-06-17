@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.7.1
+### Added
+- Drag-and-drop visual feedback on sidebar places: rows that aren't valid drop destinations grey out while a file drag is over the sidebar, matching native Nautilus behaviour
+- Home accepts file drops (copy/move via Nautilus's own FileOperations2 D-Bus, with native progress and undo)
+
+### Fixed
+- Custom sidebar places now grey out in sync with Nautilus's native rows during a drag, instead of only one group reacting
+
+---
+
 ## v0.7.0
 ### Added
 - Custom Location group on the sidebar, replacing Nautilus's native LOCATIONS section with a LOCATIONS-driven architecture

@@ -5,7 +5,6 @@ import re
 import subprocess
 import threading
 import time
-import weakref
 
 import gi
 
@@ -41,15 +40,6 @@ def _(text: str) -> str:
     return text
 
 
-def _strip_mnemonic(text: str) -> str:
-    """Drop the GTK mnemonic underscore from a label (e.g. 'Empty _Trash' -> 'Empty Trash').
-
-    Lets us pass Nautilus' exact msgids to _() so its translations are reused, then
-    render a plain label. Literal underscores in source are written '__' and preserved.
-    """
-    return text.replace("__", "\0").replace("_", "").replace("\0", "_")
-
-
 DEBUG_LOG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 DEBUG_LOG_PREFIX = "MyComputer"  # prefix for all debug lines, to make them easy to filter in logs
 
@@ -68,10 +58,13 @@ def _flag(name: str, default: bool = True) -> bool:
 
 
 def _sidebar_mode(native_enabled_default: bool) -> str:
+    # We inject only the Computer row into Nautilus's own native listbox and
+    # leave every other place native (hiding rows the user toggled off). The old
+    # inner/outer-wrapper modes that rebuilt a mimic places group are retired.
     mode = (os.environ.get("MC_SIDEBAR_MODE") or "").strip().lower()
-    if mode in ("native-list", "native-list-bottom", "inner-wrapper", "outer-wrapper"):
+    if mode in ("native-list", "native-list-bottom"):
         return mode
-    return "inner-wrapper" if native_enabled_default else "outer-wrapper"
+    return "native-list"
 
 
 DEBUG_MAIN_VIEW_ACTIVE = _flag("MC_MAIN_VIEW")  # main view: panel overlay over the file view
@@ -86,7 +79,7 @@ DEBUG_SELFTEST = _flag("MC_SELFTEST", default=False)  # in-process navigation se
 
 # ── Extension metadata (keep in sync with pyproject.toml) ────────────────────
 EXT_NAME = "My Computer for Nautilus"
-EXT_VERSION = "0.7.2"
+EXT_VERSION = "0.7.3"
 EXT_AUTHOR = "Yann Masoch"
 EXT_LICENSE = "MIT"
 EXT_GITHUB = "https://github.com/yannmasoch/nautilus-my-computer"
@@ -119,8 +112,6 @@ DBUS_PATH_NAUTILUS_FILEOPS = "/org/gnome/Nautilus/FileOperations2"
 # GSettings changed, Gio.FileMonitor, Gtk.Application window-added). The values
 # below are one-shot retry/debounce intervals, not continuous poll periods.
 _REFRESH_DEBOUNCE_MS = 300  # coalesce rapid mount/unmount/plug events
-_SIDEBAR_RECHECK_RETRY_MS = 300  # first delayed retry after async sidebar rebuild events
-_SIDEBAR_RECHECK_LATE_MS = 1000  # second delayed retry after async sidebar rebuild events
 _WIN_INIT_RETRY_MS = 20  # retry interval while waiting for NautilusWindow widget tree
 _WIN_INIT_MAX_ATTEMPTS = 100  # ~2 s budget waiting for the first view load to settle
 _NAV_RETRY_MS = 60  # retry interval while navigating to computer:///
@@ -323,56 +314,8 @@ def _computer_context_menu(ext, win, entry: PlaceEntry) -> ContextualMenu:
     )
 
 
-def _home_context_menu(ext, win, entry: PlaceEntry) -> ContextualMenu:
-    """Home row: open actions + Properties."""
-    uri = entry.uri
-    return ContextualMenu(
-        _open_actions(ext, win, uri)
-        + [MenuItem(_("Properties"), action=lambda: ext._do_properties(uri, win), section=1)]
-    )
-
-
-def _recent_context_menu(ext, win, entry: PlaceEntry) -> ContextualMenu:
-    """Recent row: open actions + File History Settings."""
-    return ContextualMenu(
-        _open_actions(ext, win, entry.uri)
-        + [
-            MenuItem(
-                _strip_mnemonic(_("File History _Settings…")),
-                action=lambda: ext._launch_settings_panel("privacy"),
-                section=1,
-            )
-        ]
-    )
-
-
-def _trash_context_menu(ext, win, entry: PlaceEntry) -> ContextualMenu:
-    """Trash row: open actions + Trash Settings + Empty Trash + Properties."""
-    uri = entry.uri
-    return ContextualMenu(
-        _open_actions(ext, win, uri)
-        + [
-            MenuItem(
-                _strip_mnemonic(_("_Trash Settings")),
-                action=lambda: ext._launch_settings_panel("privacy"),
-                section=1,
-            ),
-            MenuItem(
-                _strip_mnemonic(_("Empty _Trash")),
-                action=lambda: ext._do_empty_trash(win),
-                enabled=_trash_full,
-                section=2,
-            ),
-            MenuItem(_("Properties"), action=lambda: ext._do_properties(uri, win), section=3),
-        ]
-    )
-
-
-def _open_only_context_menu(ext, win, entry: PlaceEntry) -> ContextualMenu:
-    """Starred / Network rows: just the three open actions, no extra sections."""
-    return ContextualMenu(_open_actions(ext, win, entry.uri))
-
-
+# PLACES holds only Computer: the one place we still build our own row for. It
+# has no native equivalent, so it cannot be handled like the others below.
 PLACES: list[PlaceEntry] = [
     PlaceEntry(
         name="computer",
@@ -384,16 +327,21 @@ PLACES: list[PlaceEntry] = [
         order_index=0,
         menu=_computer_context_menu,
     ),
+]
+
+# NATIVE_PLACES describes places that stay fully NATIVE - we never build rows for
+# them. Only `name` (maps to a sidebar-show-* key), `uri` (matches the native row)
+# and `label`/`icon` (for the Preferences toggle row) are used, by
+# _apply_native_place_visibility and the sidebar-visibility prefs page. `visible`
+# is the default on/off state. Kept as PlaceEntry (same structure as PLACES) in
+# case a future place needs the full row-building fields again.
+NATIVE_PLACES: list[PlaceEntry] = [
     PlaceEntry(
         name="home",
         position=1,
         label=_("Home"),
         icon="user-home-symbolic",
         uri=GLib.filename_to_uri(GLib.get_home_dir(), None),
-        tooltip=_("Open your personal folder"),
-        order_index=1,
-        menu=_home_context_menu,
-        droppable=True,
     ),
     PlaceEntry(
         name="recent",
@@ -401,9 +349,6 @@ PLACES: list[PlaceEntry] = [
         label=_("Recent"),
         icon="document-open-recent-symbolic",
         uri="recent:///",
-        tooltip=_("Open recently used documents"),
-        order_index=2,
-        menu=_recent_context_menu,
         visible=False,
     ),
     PlaceEntry(
@@ -412,9 +357,6 @@ PLACES: list[PlaceEntry] = [
         label=_("Starred"),
         icon="starred-symbolic",
         uri="starred:///",
-        tooltip=_("Open starred files"),
-        order_index=3,
-        menu=_open_only_context_menu,
         visible=False,
     ),
     PlaceEntry(
@@ -423,9 +365,6 @@ PLACES: list[PlaceEntry] = [
         label=_("Network"),
         icon="network-computer-symbolic",
         uri="x-network-view:///",
-        tooltip=_("Browse the network"),
-        order_index=4,
-        menu=_open_only_context_menu,
         visible=False,
     ),
     PlaceEntry(
@@ -434,9 +373,6 @@ PLACES: list[PlaceEntry] = [
         label=_("Trash"),
         icon="user-trash-symbolic",
         uri="trash:///",
-        tooltip=_("Open the trash"),
-        order_index=5,
-        menu=_trash_context_menu,
     ),
 ]
 
@@ -761,22 +697,14 @@ _CSS = b"""
 }
 """
 
-# Scoped tightly to #nautilus_my_computer_section_locations to avoid side effects elsewhere.
-#
-# inner-wrapper mode: the two listboxes are direct siblings so the + combinator
-# fires. Both carry .navigation-sidebar so the theme's base padding (6px all sides)
-# applies to each. Zeroing the seam padding makes the join seamless.
-# The inter-row gap between our last row and the first native row is set
-# programmatically by _wire_native_row_gap, which reads the actual pixel gap
-# between the first two native rows after allocation via translate_coordinates.
-# This adapts to whatever value the active theme uses without hardcoding 3px.
-# NautilusSidebarRow styles itself via .sidebar-revealer - no row/revealer
-# overrides needed here.
+# Seam between our separate one-row Computer listbox and Nautilus' native list
+# directly below it. Both carry .navigation-sidebar (theme base padding 6px); the
+# + combinator zeroes the touching edges so the two lists read as one column.
 _CSS_SIDEBAR = b"""
 #nautilus_my_computer_section_locations.navigation-sidebar {
     padding-bottom: 0;
 }
-#nautilus_my_computer_section_locations.navigation-sidebar + .places-sidebar-list {
+#nautilus_my_computer_section_locations.navigation-sidebar + .navigation-sidebar {
     padding-top: 0;
 }
 """
@@ -788,175 +716,45 @@ def _log(msg: str) -> None:
         print(f"{DEBUG_LOG_PREFIX}: {msg}", flush=True)
 
 
-_places_hide_provider: Gtk.CssProvider | None = None
+def _apply_native_place_visibility(native_listbox: Gtk.ListBox, gsettings) -> None:
+    """Show/hide native sidebar place rows per the user's sidebar-show-* settings.
 
-# Native sidebar row data read before hiding: {uri: {"label": str, "tooltip": str, "icon": str}}
-_native_place_data: dict[str, dict] = {}
+    We do NOT mimic native rows anymore. Home/Recent/Starred/Network/Trash stay
+    fully native (icons, tooltips, context menus, drag-and-drop, trash-full icon -
+    all maintained by Nautilus). The only feature we add over them is a per-place
+    on/off toggle, which is just selectively hiding the native row:
 
-# Weak references to trash sidebar rows, across all windows. We own these rows
-# (Nautilus does not manage them), so we drive their icon via the row's own
-# start-icon property instead of hunting for the inner Gtk.Image.
-# Updated by _update_trash_icon() when trash state changes.
-_trash_rows: list[weakref.ref] = []
-_trash_monitor: Gio.FileMonitor | None = None
-_trash_full: bool = False
+        sidebar-show-<place> == True  -> native row visible (untouched, native)
+        sidebar-show-<place> == False -> native row hidden
 
+    Computer has no native row (we inject our own), so it is not handled here.
 
-def _register_trash_row(row: Gtk.ListBoxRow) -> None:
-    _trash_rows.append(weakref.ref(row))
-    # Apply the current state immediately so a freshly built row is correct.
-    _apply_trash_icon_to_row(row, _trash_full)
+    Matched by URI (not position) and applied with `set_visible()` on the row
+    widget, so the state follows the row when Nautilus reorders the list (device
+    mount/unmount, bookmark add/remove, async populate). A positional nth-child
+    CSS rule did NOT survive reorders. We only ever touch rows whose URI is one of
+    our places; Nautilus's own placeholder rows (e.g. the empty "Add a new
+    bookmark" drop target) are never forced visible.
 
-
-def _apply_trash_icon_to_row(row: Gtk.ListBoxRow, full: bool) -> None:
-    icon = "user-trash-full-symbolic" if full else "user-trash-symbolic"
-    # NautilusSidebarRow: set its start-icon property; it owns its inner image.
-    try:
-        row.set_property("start-icon", Gio.ThemedIcon.new(icon))
-        return
-    except Exception:
-        pass
-    # Fallback GtkListBoxRow path: find the non-button Gtk.Image and repin it.
-    for w in _all_widgets(row):
-        if not isinstance(w, Gtk.Image):
-            continue
-        parent = w.get_parent()
-        in_button = False
-        while parent and parent is not row:
-            if isinstance(parent, Gtk.Button):
-                in_button = True
-                break
-            parent = parent.get_parent()
-        if not in_button:
-            _repin_icon(w, icon)
-            break
-
-
-def _update_trash_icon(full: bool) -> None:
-    global _trash_full
-    _trash_full = full
-    dead = []
-    for ref in _trash_rows:
-        row = ref()
-        if row is None:
-            dead.append(ref)
-        else:
-            _apply_trash_icon_to_row(row, full)
-    for ref in dead:
-        _trash_rows.remove(ref)
-
-
-_TRASH_FILES_PATH = os.path.join(GLib.get_home_dir(), ".local", "share", "Trash", "files")
-
-
-def _check_trash_state() -> None:
-    try:
-        full = bool(os.listdir(_TRASH_FILES_PATH))
-    except OSError:
-        full = False
-    _log(f"_check_trash_state: full={full}")
-    _update_trash_icon(full)
-
-
-def _start_trash_monitor() -> None:
-    global _trash_monitor
-    if _trash_monitor is not None:
-        return
-    try:
-        os.makedirs(_TRASH_FILES_PATH, exist_ok=True)
-        gfile = Gio.File.new_for_path(_TRASH_FILES_PATH)
-        _trash_monitor = gfile.monitor_directory(Gio.FileMonitorFlags.NONE, None)
-        _trash_monitor.connect(
-            "changed",
-            lambda *args: _log(f"trash monitor fired event={args[-1]}") or _check_trash_state(),
-        )
-        _check_trash_state()  # seed _trash_full so later-built rows render correctly
-        _log(f"_start_trash_monitor: watching {_TRASH_FILES_PATH}")
-    except Exception as e:
-        _log(f"_start_trash_monitor: failed ({e})")
-
-
-def _read_native_place_data(native_listbox: Gtk.ListBox) -> None:
-    """Scan native sidebar rows and cache their label, tooltip, and icon name.
-    Call this BEFORE building custom rows so _build_place_sidebar_row can use
-    the native translated strings and exact icon names."""
-    place_uris = {p.uri for p in PLACES}
+    Safe to call repeatedly; re-armed on every native list change via
+    `observe_children()` items-changed (see _watch_native_list_changes)."""
+    # uri -> should-be-visible, for the togglable native places.
+    want_visible = {p.uri: _place_is_visible(p, gsettings) for p in NATIVE_PLACES}
+    hidden = 0
     idx = 0
     while (row := native_listbox.get_row_at_index(idx)) is not None:
         try:
             uri = row.get_property("uri")
         except Exception:
             uri = None
-        if uri in place_uris:
-            label = tooltip = icon_name = None
-            try:
-                label = row.get_property("label")
-            except Exception:
-                pass
-            try:
-                tooltip = row.get_property("tooltip")
-            except Exception:
-                pass
-            try:
-                gicon = row.get_property("start-icon")
-                if isinstance(gicon, Gio.ThemedIcon):
-                    names = gicon.get_names()
-                    icon_name = names[0] if names else None
-            except Exception:
-                pass
-            entry: dict = {}
-            if label:
-                entry["label"] = label
-            if tooltip:
-                entry["tooltip"] = tooltip
-            if icon_name:
-                entry["icon"] = icon_name
-            if entry:
-                _native_place_data[uri] = entry
-                _log(f"_read_native_place_data: {uri} -> label={label!r} icon={icon_name!r}")
+        if uri in want_visible:
+            visible = want_visible[uri]
+            if row.get_visible() != visible:
+                row.set_visible(visible)
+            if not visible:
+                hidden += 1
         idx += 1
-
-
-def _apply_places_hide_css(native_listbox: Gtk.ListBox, display: object) -> None:
-    """Scan the native sidebar listbox, match rows by URI against PLACES, and
-    apply a dynamic CSS provider that collapses exactly those rows.
-    Safe to call multiple times: the provider is created once and updated in place."""
-    global _places_hide_provider
-
-    place_uris = {p.uri for p in PLACES}
-    indices: list[int] = []
-    idx = 0
-    while (row := native_listbox.get_row_at_index(idx)) is not None:
-        try:
-            uri = row.get_property("uri")
-        except Exception:
-            uri = None
-        if uri in place_uris:
-            indices.append(idx + 1)  # nth-child is 1-based
-        idx += 1
-
-    if not indices:
-        return
-
-    hide_rule = (
-        "{ min-height:0; padding:0; margin:0;"
-        " font-size:0; -gtk-icon-size:0; opacity:0; border:none; }"
-    )
-    selectors = ",\n".join(
-        f"#nautilus_my_computer_section_locations + .places-sidebar-list > row:nth-child({n})"
-        for n in indices
-    )
-    css = f"{selectors}\n{hide_rule}\n".encode()
-
-    if _places_hide_provider is None:
-        _places_hide_provider = Gtk.CssProvider()
-        Gtk.StyleContext.add_provider_for_display(
-            display,
-            _places_hide_provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_USER + 1,
-        )
-    _places_hide_provider.load_from_data(css)
-    _log(f"_apply_places_hide_css: hiding nth-child positions {indices}")
+    _log(f"_apply_native_place_visibility: {hidden} native place row(s) hidden by setting")
 
 
 def _read_io_busy() -> tuple:
@@ -1479,11 +1277,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         self._windows: dict = {}
         self._polling_started = False
         self._refresh_pending = False  # debounce flag for live-refresh
-        self._bookmark_recheck_pending = False
         self._local_poll_stop: threading.Event | None = None
         self._net_poll_timer_id: int | None = None
         self._net_poll_cancellable: Gio.Cancellable | None = None
-        self._bookmark_monitor = None
 
         self._sort_column: str = "name"
         self._sort_reverse: bool = False
@@ -1544,10 +1340,6 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         # Kick off async network:/// discovery immediately
         _refresh_network_places(on_done=self._do_live_refresh)
-
-        _start_trash_monitor()
-
-        self._watch_bookmarks_file()
 
         GLib.idle_add(self._late_init)
 
@@ -1717,6 +1509,15 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             state["stale_release_tick_id"] = None
             state["stale_release_ticks"] = 0
             state.get("stale_generations", []).clear()
+            model = state.get("native_hide_model")
+            handler = state.get("native_hide_handler")
+            if model is not None and handler:
+                try:
+                    model.disconnect(handler)
+                except Exception:
+                    pass
+            state["native_hide_model"] = None
+            state["native_hide_handler"] = None
         # Stop usage poll workers if this was the last window showing our panel.
         self._stop_usage_poll_if_idle()
 
@@ -1802,8 +1603,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             # Grouping change only -- no rescan needed, just re-render
             self._repopulate_visible()
         elif key.startswith("sidebar-show-"):
-            # Sidebar place toggle -- rebuild the custom places listbox in place
-            GLib.idle_add(self._rebuild_sidebar_places)
+            # Sidebar place toggle -- re-apply native row visibility in every window.
+            GLib.idle_add(self._reapply_sidebar_visibility)
 
     def _apply_bar_color(self) -> None:
         if not self._gsettings or self._bar_css_display is None:
@@ -1957,50 +1758,6 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
     def _on_disk_event(self, _monitor, *_args) -> None:
         """VolumeMonitor signal handler — debounced."""
         self._schedule_live_refresh()
-
-    def _watch_bookmarks_file(self) -> None:
-        bookmarks_path = os.path.join(GLib.get_user_config_dir(), "gtk-3.0", "bookmarks")
-        try:
-            bookmarks_file = Gio.File.new_for_path(bookmarks_path)
-            self._bookmark_monitor = bookmarks_file.monitor_file(
-                Gio.FileMonitorFlags.NONE,
-                None,
-            )
-            self._bookmark_monitor.set_rate_limit(1000)
-            self._bookmark_monitor.connect("changed", self._on_bookmarks_file_changed)
-        except Exception as e:
-            self._bookmark_monitor = None
-            _log(f"bookmark file monitor unavailable ({e})")
-
-    def _on_bookmarks_file_changed(
-        self,
-        _monitor,
-        _child,
-        _other_file,
-        event_type: Gio.FileMonitorEvent,
-    ) -> None:
-        if event_type not in (
-            Gio.FileMonitorEvent.CHANGED,
-            Gio.FileMonitorEvent.CREATED,
-            Gio.FileMonitorEvent.CHANGES_DONE_HINT,
-        ):
-            return
-        self._schedule_bookmarks_sidebar_recheck()
-
-    def _schedule_bookmarks_sidebar_recheck(self) -> None:
-        if self._bookmark_recheck_pending:
-            return
-        self._bookmark_recheck_pending = True
-        GLib.idle_add(self._do_bookmarks_sidebar_recheck)
-
-    def _do_bookmarks_sidebar_recheck(self) -> bool:
-        self._bookmark_recheck_pending = False
-        for win, state in list(self._windows.items()):
-            if state.get("sidebar_native"):
-                self._schedule_native_sidebar_ensure(win)
-                self._schedule_native_sidebar_ensure(win, _SIDEBAR_RECHECK_RETRY_MS)
-                self._schedule_native_sidebar_ensure(win, _SIDEBAR_RECHECK_LATE_MS)
-        return GLib.SOURCE_REMOVE
 
     def _on_proc_mounts_changed(self, _source, _condition) -> bool:
         """/proc/mounts POLLPRI handler — any kernel mount change."""
@@ -2266,6 +2023,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             "awaiting_disks": False,
             "selected_key": None,
             "header_motion": None,  # Gtk.EventControllerMotion on the header bar
+            "native_hide_model": None,  # observe_children() model of native listbox
+            "native_hide_handler": None,  # items-changed handler id on that model
+            "native_hide_pending": False,  # coalesces re-hide bursts into one idle pass
         }
         overlay.weak_ref(
             lambda w=nautilus_win, st=self._windows.get(nautilus_win): (
@@ -2805,17 +2565,6 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             destination = m.nav_uri
         return self._drop_files_to_destination(target, value, destination, win)
 
-    def _on_place_files_dropped(
-        self,
-        target: Gtk.DropTarget,
-        value: Gdk.FileList,
-        x: float,
-        y: float,
-        destination: str,
-        win: Gtk.Window,
-    ) -> bool:
-        return self._drop_files_to_destination(target, value, destination, win)
-
     def _drop_files_to_destination(
         self,
         target: Gtk.DropTarget,
@@ -3137,37 +2886,6 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         except GLib.Error as e:
             _log(f"settings launch failed ({panel}): {e.message}")
 
-    def _do_empty_trash(self, win: Gtk.Window) -> None:
-        """Empty the trash via Nautilus' own engine so the native confirm dialog shows."""
-
-        def _on_call(bus, result, _):
-            try:
-                bus.call_finish(result)
-            except Exception as e:
-                _log(f"EmptyTrash failed: {e}")
-            GLib.idle_add(self._repopulate_visible)
-
-        def _on_bus(_, result):
-            try:
-                bus = Gio.bus_get_finish(result)
-                bus.call(
-                    DBUS_NAUTILUS,
-                    DBUS_PATH_NAUTILUS_FILEOPS,
-                    DBUS_NAUTILUS_FILEOPS,
-                    "EmptyTrash",
-                    GLib.Variant("(ba{sv})", (True, {})),
-                    None,
-                    Gio.DBusCallFlags.NONE,
-                    -1,
-                    None,
-                    _on_call,
-                    None,
-                )
-            except Exception as e:
-                _log(f"EmptyTrash bus error: {e}")
-
-        Gio.bus_get(Gio.BusType.SESSION, None, _on_bus)
-
     def _launch_prefs(self, win: Gtk.Window | None = None) -> None:
         if not self._gsettings:
             return
@@ -3235,11 +2953,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         sidebar_vis_group.set_description(_("Choose which locations appear on the sidebar."))
         page.add(sidebar_vis_group)
 
-        # One toggle per location, skipping Computer (always shown, no key).
-        for entry in PLACES:
-            gskey = _PLACE_VISIBILITY_KEYS.get(entry.name)
-            if gskey is None:
-                continue
+        # One toggle per native place (Computer is always shown, no key, not here).
+        for entry in NATIVE_PLACES:
+            gskey = _PLACE_VISIBILITY_KEYS[entry.name]
             place_row = Adw.SwitchRow()
             place_row.set_title(entry.label)
             icon_img = Gtk.Image.new_from_icon_name(entry.icon)
@@ -3469,320 +3185,14 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                 return w
         return None
 
-    def _find_sidebar_scrolled_window(
-        self, nautilus_sidebar: Gtk.Widget, native_listbox: Gtk.ListBox | None = None
-    ) -> Gtk.ScrolledWindow | None:
-        target_listbox = native_listbox or self._find_sidebar_listbox(nautilus_sidebar)
-        for w in _all_widgets(nautilus_sidebar):
-            if not isinstance(w, Gtk.ScrolledWindow):
-                continue
-            if target_listbox is None:
-                return w
-            parent = target_listbox.get_parent()
-            while parent is not None:
-                if parent is w:
-                    return w
-                parent = parent.get_parent()
-        return None
-
-    def _build_places_sidebar_listbox(
-        self, win: Gtk.Window, nautilus_sidebar: Gtk.Widget | None = None
-    ) -> Gtk.ListBox:
-        our_listbox = Gtk.ListBox()
-        our_listbox.set_name("nautilus_my_computer_section_locations")
-        our_listbox.add_css_class("navigation-sidebar")
-        our_listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
-
-        # row -> uri map kept on the listbox so the row-activated handler and
-        # later rebuilds (on sidebar-show-* changes) share the same dict.
-        our_listbox._row_uris = {}
-        self._populate_places_listbox(win, our_listbox, nautilus_sidebar)
-
-        our_listbox.connect(
-            "row-activated",
-            lambda lb, row: self._navigate_to(lb._row_uris.get(row, DISKS_URI), win),
-        )
-        return our_listbox
-
-    def _wire_sidebar_drop_dimming(
-        self, area: Gtk.Widget, our_listbox: Gtk.ListBox, native_listbox: Gtk.ListBox | None
-    ) -> None:
-        """Mirror Nautilus' own sidebar behaviour (nautilus-sidebar.c
-        update_possible_drop_targets): while a drag is anywhere over the
-        sidebar, desensitize rows that aren't valid file-drop destinations so
-        they gray out like native rows. Restore sensitivity once the drag
-        leaves.
-
-        Nautilus dims its own native rows only while the pointer is over its
-        own list_box; if a drag starts in (or stays in) our separate listbox,
-        the native rows never gray. So we replicate Nautilus' validity check
-        on the native rows ourselves too, keeping both groups consistent. We
-        only grey the rows Nautilus itself treats as invalid for a file drag
-        (recent:/// is hardcoded invalid in check_valid_drop_target); drives,
-        bookmarks, Home and Trash stay droppable. Our own rows use the
-        per-place `_droppable` flag. `area` is the shared wrapper covering
-        both groups, so the drag is caught even when it starts directly over
-        a child without crossing `area`'s own border.
-        """
-
-        def _native_row_droppable(row: Gtk.ListBoxRow) -> bool:
-            # Mirror nautilus-sidebar.c check_valid_drop_target for a file drag:
-            # a row is NOT a valid drop target (gets greyed) when its uri is
-            # NULL/empty - which is the case for unmounted volumes ("uri may be
-            # NULL for unmounted volumes ... we don't allow drops there") - or
-            # when it is one of the schemes that never accept a file drop
-            # (recent://, starred://, computer://, x-network-view://). Mounted
-            # writable locations (file://, smb://, trash://) stay droppable.
-            try:
-                uri = row.get_property("uri")
-            except (TypeError, ValueError):
-                return True
-            if not uri:
-                return False
-            return uri not in _SIDEBAR_DROP_EXCLUDED_URIS
-
-        def _set_dimmed(dimmed: bool) -> None:
-            for row in getattr(our_listbox, "_row_uris", {}):
-                row.set_sensitive(not dimmed or getattr(row, "_droppable", False))
-            if native_listbox is not None:
-                child = native_listbox.get_first_child()
-                while child is not None:
-                    if isinstance(child, Gtk.ListBoxRow):
-                        child.set_sensitive(not dimmed or _native_row_droppable(child))
-                    child = child.get_next_sibling()
-
-        # Gtk.DropControllerMotion (unlike Gtk.DropTarget/DropTargetAsync) never
-        # claims or negotiates the drag, so it is safe to stack on top of
-        # Nautilus' own Gtk.DropTarget without disturbing its hover-to-open.
-        #
-        # The controller's enter/leave bounce as the pointer descends into a
-        # child whose own Gtk.DropTarget claims the Gdk.Drop (notably
-        # native_listbox), which would flicker the dimming off. We can't simply
-        # un-dim on every leave (it fires constantly while moving between rows),
-        # nor latch only on drag-end (then it never clears when the drag leaves
-        # the sidebar but keeps going elsewhere). So: dim on enter/motion, and
-        # on leave re-check `contains_pointer` on idle - a transient child
-        # boundary still reports the pointer as contained, a real sidebar exit
-        # does not. A drag-end safety net clears the dimming if the drag is
-        # dropped/cancelled outside the sidebar entirely.
-        drag_state = {"drag": None}
-
-        def _undim(*_a):
-            drag_state["drag"] = None
-            _set_dimmed(False)
-
-        def _on_enter(controller, *_a):
-            _set_dimmed(True)
-            if drag_state["drag"] is not None:
-                return
-            drop = controller.get_drop()
-            drag = drop.get_drag() if drop is not None else None
-            if drag is None:
-                return
-            drag_state["drag"] = drag
-            drag.connect("dnd-finished", _undim)
-            drag.connect("cancel", lambda *_a: _undim())
-
-        def _on_leave(controller, *_a):
-            def _check():
-                if not controller.contains_pointer():
-                    _set_dimmed(False)
-                return GLib.SOURCE_REMOVE
-
-            GLib.idle_add(_check)
-
-        motion = Gtk.DropControllerMotion.new()
-        motion.connect("enter", _on_enter)
-        motion.connect("motion", lambda *_a: _set_dimmed(True))
-        motion.connect("leave", _on_leave)
-        area.add_controller(motion)
-
-    def _populate_places_listbox(
-        self,
-        win: Gtk.Window,
-        our_listbox: Gtk.ListBox,
-        nautilus_sidebar: Gtk.Widget | None = None,
-    ) -> None:
-        """(Re)build the rows of the custom places listbox from current settings.
-
-        Computer is always first; every other place is included only when its
-        sidebar-show-* setting is enabled.
-        """
-        row_uris: dict[Gtk.ListBoxRow, str] = {}
-        for entry in [p for p in PLACES if _place_is_visible(p, self._gsettings)]:
-            row = self._build_place_sidebar_row(win, entry, nautilus_sidebar)
-            row._droppable = entry.droppable
-            our_listbox.append(row)
-            row_uris[row] = entry.uri
-        our_listbox._row_uris = row_uris
-
-    def _rebuild_sidebar_places(self) -> bool:
-        """Rebuild every window's custom places listbox in place after a
-        sidebar-show-* setting change. Clears the existing rows and repopulates
-        from the current settings, preserving the listbox widget (so the
-        row-activated handler and cross-deselect wiring stay intact)."""
-        for win, state in list(self._windows.items()):
-            our_listbox = state.get("sidebar_listbox")
-            if our_listbox is None or state.get("sidebar_native"):
-                continue
-            child = our_listbox.get_first_child()
-            while child is not None:
-                nxt = child.get_next_sibling()
-                our_listbox.remove(child)
-                child = nxt
-            nautilus_sidebar = state.get("sidebar_native_widget")
-            self._populate_places_listbox(win, our_listbox, nautilus_sidebar)
-            state["sidebar_row"] = our_listbox.get_row_at_index(0)
-            # Re-select the Computer row if the panel is currently shown.
-            if state.get("visible_view") == VIEW_DISKINFO:
-                row = our_listbox.get_row_at_index(0)
-                if row is not None:
-                    our_listbox.select_row(row)
-        return GLib.SOURCE_REMOVE
-
-    def _wire_sidebar_cross_deselect(
-        self,
-        win: Gtk.Window,
-        our_listbox: Gtk.ListBox,
-        native_listbox: Gtk.ListBox,
-        nautilus_sidebar: Gtk.Widget | None = None,
-    ) -> None:
-        # Native listboxes are the source of truth for selection state. We
-        # mirror them: whenever any native section (Places, Devices, Bookmarks…)
-        # changes its selection, we re-derive our highlight from the *aggregate*
-        # native state - the URI currently selected across all native listboxes.
-        # If that URI matches one of our places, select our matching row;
-        # otherwise deselect ours. We never push back to native - that would
-        # create a signal loop.
-        #
-        # Reacting to the aggregate (not the single signal's row argument) is
-        # essential: a row-selected(None) fires transiently while navigating
-        # between two places, and acting on it alone would wrongly clear our
-        # selection. Scanning all listboxes for the real current selection makes
-        # the mirror order-independent and robust to those transient deselects.
-        connected: list[Gtk.ListBox] = []
-        for lb in [native_listbox] + (
-            [
-                w
-                for w in _all_widgets(nautilus_sidebar)
-                if isinstance(w, Gtk.ListBox) and w is not our_listbox
-            ]
-            if nautilus_sidebar is not None
-            else []
-        ):
-            if not any(lb is c for c in connected):
-                connected.append(lb)
-
-        _mirroring: list[bool] = [False]
-
-        def _current_native_uri() -> str | None:
-            for lb in connected:
-                sel = lb.get_selected_row()
-                if sel is None:
-                    continue
-                try:
-                    uri = sel.get_property("uri")
-                except Exception:
-                    uri = None
-                if uri:
-                    return uri
-            return None
-
-        def _sync_from_native(*_args):
-            if _mirroring[0]:
-                return
-            native_uri = _current_native_uri()
-            uri_to_our_row = {v: k for k, v in (our_listbox._row_uris or {}).items()}
-            our_row = uri_to_our_row.get(native_uri) if native_uri else None
-            _mirroring[0] = True
-            try:
-                if our_row is not None:
-                    if our_listbox.get_selected_row() is not our_row:
-                        our_listbox.select_row(our_row)
-                elif our_listbox.get_selected_row() is not None:
-                    our_listbox.unselect_all()
-            finally:
-                _mirroring[0] = False
-
-        for lb in connected:
-            lb.connect("row-selected", _sync_from_native)
-
-        # Expose the sync so _on_title_changed can re-derive our highlight when
-        # leaving the computer view. The Computer row has no live native row to
-        # mirror (the native one is hidden and Nautilus never selects it), so it
-        # is selected manually on entry; on exit nothing fires a native signal,
-        # and this lets us re-check the aggregate native state to clear it when
-        # the destination (e.g. /tmp/) is not one of our places.
-        state = self._windows.get(win)
-        if state is not None:
-            state["sidebar_sync"] = _sync_from_native
-
-        _log(f"_inject_sidebar_link: mirror-select wired to {len(connected)} listbox(es) ✓")
-
-    def _wire_native_row_gap(self, our_listbox: Gtk.ListBox, native_listbox: Gtk.ListBox) -> None:
-        # Measure the actual pixel gap between the first two native sidebar rows
-        # and apply it as margin_bottom on our listbox so the join is seamless
-        # regardless of which GTK theme is active.
-        # translate_coordinates reads the live allocation; setting margin on our
-        # listbox (not the native one) avoids a layout loop.
-        last_gap: list[int | None] = [None]
-
-        def _measure() -> bool:
-            row0 = native_listbox.get_row_at_index(0)
-            row1 = native_listbox.get_row_at_index(1)
-            our_row = our_listbox.get_row_at_index(0)
-            if row0 is None or row1 is None or our_row is None:
-                our_listbox.set_margin_bottom(0)
-                return GLib.SOURCE_REMOVE
-            if not row0.get_realized() or not row1.get_realized() or not our_row.get_realized():
-                our_listbox.set_margin_bottom(0)
-                return GLib.SOURCE_REMOVE
-            # Desired gap: the rendered space between two consecutive native rows.
-            coords = row1.translate_coordinates(row0, 0, 0)
-            if coords is None:
-                our_listbox.set_margin_bottom(0)
-                return GLib.SOURCE_REMOVE
-            # PyGObject returns (x, y) as a 2-tuple.
-            row1_top_in_row0 = coords[1] if len(coords) >= 2 else coords[0]
-            desired_gap = row1_top_in_row0 - row0.get_height()
-            # Actual rendered seam between our last row and the first native row.
-            # This already includes whatever margin_bottom we applied last pass,
-            # plus any natural spacing (listbox padding, row revealer margins) that
-            # the seam CSS doesn't fully zero. Setting margin_bottom = desired_gap
-            # blindly double-counts that natural spacing, leaving an extra gap.
-            seam_coords = row0.translate_coordinates(our_row, 0, 0)
-            if seam_coords is None:
-                our_listbox.set_margin_bottom(0)
-                return GLib.SOURCE_REMOVE
-            row0_top_in_our_row = seam_coords[1] if len(seam_coords) >= 2 else seam_coords[0]
-            actual_seam = row0_top_in_our_row - our_row.get_height()
-            current_margin = our_listbox.get_margin_bottom()
-            natural_seam = actual_seam - current_margin
-            target = max(0, int(round(desired_gap - natural_seam)))
-            if target != current_margin:
-                our_listbox.set_margin_bottom(target)
-            last_gap[0] = target
-            return GLib.SOURCE_REMOVE
-
-        def _schedule(_lb=None) -> None:
-            GLib.idle_add(_measure)
-
-        # notify::height/width replace the removed size-allocate signal (GTK 4.12+)
-        native_listbox.connect("notify::height", lambda *_: _schedule())
-        native_listbox.connect("notify::width", lambda *_: _schedule())
-        if native_listbox.get_mapped():
-            _schedule()
-        else:
-            native_listbox.connect("map", _schedule)
-
     def _build_place_sidebar_row(
         self, win: Gtk.Window, entry: PlaceEntry, nautilus_sidebar: Gtk.Widget | None = None
     ) -> Gtk.ListBoxRow:
-        # Prefer native sidebar row data (already translated, exact icon) over our defaults.
-        native = _native_place_data.get(entry.uri, {})
-        row_label = native.get("label", entry.label)
-        row_tooltip = native.get("tooltip", entry.tooltip)
-        icon_name = native.get("icon", entry.icon)
+        # Only the Computer row is built here (it has no native equivalent). Every
+        # other place stays native; we just toggle its native row's visibility.
+        row_label = entry.label
+        row_tooltip = entry.tooltip
+        icon_name = entry.icon
 
         # Try to instantiate NautilusSidebarRow directly from the Nautilus GObject
         # type system. It is registered at runtime when Nautilus loads, so
@@ -3834,33 +3244,25 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         list_row.add_css_class("activatable")
 
-        is_trash = entry.name == "trash"
-
-        if is_trash:
-            # We own this row; drive its icon via start-icon, kept in sync with the
-            # live trash state. No inner-image pinning (it would fight the updates).
-            _register_trash_row(list_row)
-        else:
-
-            def _pin_row_icon():
-                for w in _all_widgets(list_row):
-                    if not isinstance(w, Gtk.Image):
-                        continue
-                    parent = w.get_parent()
-                    in_button = False
-                    while parent and parent is not list_row:
-                        if isinstance(parent, Gtk.Button):
-                            in_button = True
-                            break
-                        parent = parent.get_parent()
-                    if not in_button:
-                        _pin_icon(w, icon_name)
+        def _pin_row_icon():
+            for w in _all_widgets(list_row):
+                if not isinstance(w, Gtk.Image):
+                    continue
+                parent = w.get_parent()
+                in_button = False
+                while parent and parent is not list_row:
+                    if isinstance(parent, Gtk.Button):
+                        in_button = True
                         break
-                return GLib.SOURCE_REMOVE
+                    parent = parent.get_parent()
+                if not in_button:
+                    _pin_icon(w, icon_name)
+                    break
+            return GLib.SOURCE_REMOVE
 
-            GLib.idle_add(_pin_row_icon)
+        GLib.idle_add(_pin_row_icon)
 
-        # Right-click context menu: any place whose entry carries a menu factory.
+        # Right-click context menu (Computer carries _computer_context_menu).
         if callable(entry.menu):
 
             def _on_place_right_clicked(gesture, _n, x, y):
@@ -3877,13 +3279,6 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             right_click.connect("pressed", _on_place_right_clicked)
             list_row.add_controller(right_click)
 
-        # Accept file drops only on places marked as valid copy/move destinations.
-        if entry.droppable:
-            drop = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
-            drop.connect("motion", self._on_drop_motion)
-            drop.connect("drop", self._on_place_files_dropped, entry.uri, win)
-            list_row.add_controller(drop)
-
         # Hide the eject button - not applicable for our injected entries.
         btn = _find_widget(list_row, buildable_id="eject_button")
         if isinstance(btn, Gtk.Button):
@@ -3891,46 +3286,66 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         return list_row
 
-    def _row_is_inside_listbox(self, row: Gtk.Widget, listbox: Gtk.ListBox) -> bool:
-        parent = row.get_parent()
-        while parent is not None:
-            if parent is listbox:
-                return True
-            parent = parent.get_parent()
-        return False
+    def _find_sidebar_scrolled_window(
+        self, nautilus_sidebar: Gtk.Widget, native_listbox: Gtk.ListBox | None = None
+    ) -> Gtk.ScrolledWindow | None:
+        target_listbox = native_listbox or self._find_sidebar_listbox(nautilus_sidebar)
+        for w in _all_widgets(nautilus_sidebar):
+            if not isinstance(w, Gtk.ScrolledWindow):
+                continue
+            if target_listbox is None:
+                return w
+            parent = target_listbox.get_parent()
+            while parent is not None:
+                if parent is w:
+                    return w
+                parent = parent.get_parent()
+        return None
 
-    def _row_is_first_in_listbox(self, row: Gtk.Widget, listbox: Gtk.ListBox) -> bool:
-        return self._row_is_inside_listbox(row, listbox) and row.get_prev_sibling() is None
-
-    def _row_is_last_in_listbox(self, row: Gtk.Widget, listbox: Gtk.ListBox) -> bool:
-        return self._row_is_inside_listbox(row, listbox) and row.get_next_sibling() is None
-
-    def _inject_native_sidebar_link(
+    def _inject_separate_computer_row(
         self,
         win: Gtk.Window,
         nautilus_sidebar: Gtk.Widget,
+        native_scrolled_window: Gtk.ScrolledWindow,
         native_listbox: Gtk.ListBox,
-        list_row: Gtk.ListBoxRow,
-        *,
-        keep_at_bottom: bool = False,
     ) -> bool:
-        def _on_row_activated(_listbox, row):
-            if row is list_row:
-                self._navigate_to(DISKS_URI, win)
+        """Put a one-row 'Computer' listbox ABOVE Nautilus' native list, inside
+        the sidebar's scrolled window. Computer is visually its own section; it
+        never enters Nautilus' managed listbox, so Nautilus rebuilds (bookmark
+        drag-and-drop, mounts) never move/remove it - no flicker. The native
+        places stay native; we only hide the ones toggled off via settings.
 
-        native_listbox.connect("row-activated", _on_row_activated)
-
-        # Cross-deselect across all native sidebar sections. Nautilus uses a
-        # separate GtkListBox per section (Places, Devices, Bookmarks…); GTK
-        # does not deselect across listboxes automatically, so two sections can
-        # appear selected at once. Wire every listbox so that a selection in one
-        # clears all others.
-        _deselecting: list[bool] = [False]
-        all_lbs = list(
-            {
-                id(w): w for w in _all_widgets(nautilus_sidebar) if isinstance(w, Gtk.ListBox)
-            }.values()
+        Builds one row per entry in PLACES (currently just Computer), rather than
+        hardcoding the single row, so a future custom place only needs adding to
+        PLACES."""
+        our_listbox = Gtk.ListBox()
+        our_listbox.set_name("nautilus_my_computer_section_locations")
+        our_listbox.add_css_class("navigation-sidebar")
+        our_listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        row_uris: dict[Gtk.ListBoxRow, str] = {}
+        for entry in PLACES:
+            row = self._build_place_sidebar_row(win, entry, nautilus_sidebar)
+            our_listbox.append(row)
+            row_uris[row] = entry.uri
+        our_listbox.connect(
+            "row-activated", lambda _lb, row: self._navigate_to(row_uris.get(row, DISKS_URI), win)
         )
+        computer_row = our_listbox.get_row_at_index(0)
+
+        # Wrap: our one-row list on top, the native list below, in the existing
+        # scrolled window so both scroll together.
+        wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        wrapper.set_name("nautilus_my_computer_sidebar_wrapper")
+        native_scrolled_window.set_child(wrapper)
+        wrapper.append(our_listbox)
+        wrapper.append(native_listbox)
+
+        # Cross-deselect: our Computer selection and any native section selection
+        # are mutually exclusive (GTK does not deselect across separate listboxes).
+        all_lbs = [our_listbox] + [
+            w for w in _all_widgets(nautilus_sidebar) if isinstance(w, Gtk.ListBox)
+        ]
+        _deselecting = [False]
 
         def _on_any_lb_selected(selected_lb, row):
             if _deselecting[0] or row is None:
@@ -3949,110 +3364,117 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         state = self._windows.get(win)
         if state is not None:
             state["sidebar_listbox"] = native_listbox
-            state["sidebar_row"] = list_row
+            state["sidebar_our_listbox"] = our_listbox
+            state["sidebar_row"] = computer_row
             state["sidebar_native"] = True
             state["sidebar_native_widget"] = nautilus_sidebar
-            state["sidebar_native_bottom"] = keep_at_bottom
 
-        self._ensure_native_sidebar_row(win)
-        self._schedule_native_sidebar_ensure(win, _SIDEBAR_RECHECK_RETRY_MS)
+        # Hide native place rows the user toggled off, and re-apply on rebuilds.
+        self._apply_native_place_visibility(native_listbox)
+        self._watch_native_list_changes(win, native_listbox)
+
+        self._wire_computer_drop_dimming(wrapper, computer_row)
         return True
 
-    def _inject_inner_wrapper_sidebar_link(
-        self,
-        win: Gtk.Window,
-        native_scrolled_window: Gtk.ScrolledWindow,
-        native_listbox: Gtk.ListBox,
-        nautilus_sidebar: Gtk.Widget | None = None,
-    ) -> bool:
-        _read_native_place_data(native_listbox)
-        our_listbox = self._build_places_sidebar_listbox(win, nautilus_sidebar)
-        native_listbox.add_css_class("places-sidebar-list")
+    def _wire_computer_drop_dimming(self, area: Gtk.Widget, computer_row: Gtk.ListBoxRow) -> None:
+        """Grey out (desensitize) the Computer row while a file drag is over the
+        sidebar, matching Nautilus' own invalid-drop-target feedback. Computer
+        has no Gtk.DropTarget of its own (it is not a real folder, like
+        recent:/// or starred:///), so a desensitized row simply never receives
+        pointer/drop events - that IS the rejection mechanism, not a DropTarget
+        that claims and refuses the drag.
 
-        wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        wrapper.set_name("nautilus_my_computer_sidebar_wrapper")
-        wrapper.set_margin_bottom(0)
-        native_scrolled_window.set_child(wrapper)
-        wrapper.append(our_listbox)
-        wrapper.append(native_listbox)
+        Latches to the Gdk.Drag's lifetime rather than raw enter/leave: a child
+        widget's own Gtk.DropTarget (Nautilus' native listbox has one) steals
+        the drop and fires a spurious `leave` on this controller as the pointer
+        crosses into it, which would flicker the dimming off. See
+        tmp/Logs/2026-06-16 - 1719 - [Feature] Drag-and-drop sidebar visual
+        feedback.md for the full investigation - this is the proven fix."""
+        drag_state = {"drag": None}
 
-        self._wire_sidebar_cross_deselect(win, our_listbox, native_listbox, nautilus_sidebar)
-        self._wire_native_row_gap(our_listbox, native_listbox)
-        self._wire_sidebar_drop_dimming(wrapper, our_listbox, native_listbox)
-        _apply_places_hide_css(native_listbox, win.get_display())
+        def _set_dimmed(dimmed: bool) -> None:
+            computer_row.set_sensitive(not dimmed)
 
+        def _undim(*_a):
+            drag_state["drag"] = None
+            _set_dimmed(False)
+
+        def _on_enter(controller, *_a):
+            _set_dimmed(True)
+            if drag_state["drag"] is not None:
+                return
+            drop = controller.get_drop()
+            drag = drop.get_drag() if drop is not None else None
+            if drag is None:
+                return
+            drag_state["drag"] = drag
+            drag.connect("dnd-finished", _undim)
+            drag.connect("cancel", lambda *_a: _undim())
+
+        def _on_leave(controller, *_a):
+            def _check():
+                if not controller.contains_pointer():
+                    _set_dimmed(False)
+                return GLib.SOURCE_REMOVE
+
+            GLib.idle_add(_check)
+
+        motion = Gtk.DropControllerMotion.new()
+        motion.connect("enter", _on_enter)
+        motion.connect("motion", lambda *_a: _set_dimmed(True))
+        motion.connect("leave", _on_leave)
+        area.add_controller(motion)
+
+    def _watch_native_list_changes(self, win: Gtk.Window, native_listbox: Gtk.ListBox) -> None:
+        """Re-apply native place visibility whenever Nautilus mutates the list.
+
+        `observe_children()` returns a live GListModel of the listbox's child
+        rows; its items-changed fires on add, remove AND reorder. Because we set
+        row visibility with `set_visible()` (a property Nautilus can overwrite
+        when it rebuilds a row), a one-shot pass is not enough - this watcher
+        re-applies it.
+
+        Changes arrive in bursts (Nautilus rebuilds several rows at once), so we
+        coalesce into a single GLib.idle_add pass via a per-window pending flag
+        (idle, not a timeout - no polling)."""
         state = self._windows.get(win)
-        if state is not None:
-            state["sidebar_listbox"] = our_listbox
-            state["sidebar_row"] = our_listbox.get_row_at_index(0)
-            state["sidebar_native"] = False
-            state["sidebar_native_widget"] = nautilus_sidebar
-            state["sidebar_mode"] = "inner-wrapper"
+        if state is None:
+            return
+        model = native_listbox.observe_children()
 
-        _log("_inject_sidebar_link: inner wrapper set inside native scrolled window ✓")
-        return True
-
-    def _ensure_native_sidebar_row(self, win: Gtk.Window) -> bool:
-        state = self._windows.get(win)
-        if state is None or not state.get("sidebar_native"):
+        def _rescan() -> bool:
+            state["native_hide_pending"] = False
+            self._apply_native_place_visibility(native_listbox)
             return GLib.SOURCE_REMOVE
 
-        nautilus_sidebar = state.get("sidebar_native_widget")
-        list_row = state.get("sidebar_row")
-        if nautilus_sidebar is None or list_row is None:
-            return GLib.SOURCE_REMOVE
+        def _on_items_changed(*_a) -> None:
+            if state.get("native_hide_pending"):
+                return
+            state["native_hide_pending"] = True
+            GLib.idle_add(_rescan)
 
-        native_listbox = self._find_sidebar_listbox(nautilus_sidebar)
-        if native_listbox is None:
-            return GLib.SOURCE_REMOVE
+        handler_id = model.connect("items-changed", _on_items_changed)
+        # Keep refs alive for the window's lifetime so the model is not collected.
+        state["native_hide_model"] = model
+        state["native_hide_handler"] = handler_id
 
-        state["sidebar_listbox"] = native_listbox
-        state["sidebar_ensure_id"] = None
-        keep_at_bottom = bool(state.get("sidebar_native_bottom"))
-        if keep_at_bottom and self._row_is_last_in_listbox(list_row, native_listbox):
-            return GLib.SOURCE_REMOVE
-        if not keep_at_bottom and self._row_is_first_in_listbox(list_row, native_listbox):
-            return GLib.SOURCE_REMOVE
+    def _apply_native_place_visibility(self, native_listbox: Gtk.ListBox) -> None:
+        """Instance shim so call sites can use self; delegates to the helper."""
+        _apply_native_place_visibility(native_listbox, self._gsettings)
 
-        try:
-            if self._row_is_inside_listbox(list_row, native_listbox):
-                native_listbox.remove(list_row)
-                if keep_at_bottom:
-                    _log("_ensure_native_sidebar_row: Computer row moved to bottom of native list")
-                else:
-                    _log("_ensure_native_sidebar_row: Computer row moved to top of native list")
-            native_listbox.insert(list_row, -1 if keep_at_bottom else 0)
-            if keep_at_bottom:
-                _log("_ensure_native_sidebar_row: Computer row inserted at bottom of native list")
-            else:
-                _log("_ensure_native_sidebar_row: Computer row inserted into native list")
-        except Exception as e:
-            _log(f"_ensure_native_sidebar_row: native insert failed ({e})")
+    def _reapply_sidebar_visibility(self) -> bool:
+        """Re-apply native place visibility in every window after a settings change."""
+        for _win, state in list(self._windows.items()):
+            native_listbox = state.get("sidebar_listbox")
+            if native_listbox is not None:
+                self._apply_native_place_visibility(native_listbox)
         return GLib.SOURCE_REMOVE
 
-    def _schedule_native_sidebar_ensure(self, win: Gtk.Window, delay_ms: int = 0) -> None:
-        state = self._windows.get(win)
-        if state is None or not state.get("sidebar_native"):
-            return
-        if delay_ms <= 0:
-            if state.get("sidebar_ensure_id") is not None:
-                return
-            state["sidebar_ensure_id"] = GLib.idle_add(
-                self._ensure_native_sidebar_row,
-                win,
-                priority=GLib.PRIORITY_LOW,
-            )
-        else:
-            GLib.timeout_add(delay_ms, self._ensure_native_sidebar_row, win)
-
     def _inject_sidebar_link(self, win: Gtk.Window) -> bool:
-        """Inject the Computer row using the selected sidebar strategy.
-
-        Modes:
-        - native-list: insert a NautilusSidebarRow into Nautilus' managed list
-        - native-list-bottom: insert a NautilusSidebarRow at the bottom of Nautilus' managed list
-        - inner-wrapper: place our row above Nautilus' list inside its scrolled window
-        - outer-wrapper: place our row above NautilusSidebar outside its internal tree
+        """Inject a separate one-row 'Computer' section above Nautilus' native
+        sidebar list. Computer lives in its own listbox (never in Nautilus'
+        managed list), so Nautilus rebuilds never move it. Every other place
+        stays native; we only hide the ones toggled off via settings.
         """
         split_view = next(
             (w for w in _all_widgets(win) if isinstance(w, Adw.OverlaySplitView)), None
@@ -4073,87 +3495,26 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         _log(f"_inject_sidebar_link: content={type(nautilus_sidebar).__name__}")
 
         native_listbox = self._find_sidebar_listbox(nautilus_sidebar)
-        _log(f"_inject_sidebar_link: mode={DEBUG_SIDEBAR_MODE}")
+        if native_listbox is None:
+            _log("_inject_sidebar_link: native listbox unavailable")
+            return False
 
-        if DEBUG_SIDEBAR_MODE in ("native-list", "native-list-bottom"):
-            if native_listbox is not None:
-                list_row = self._build_place_sidebar_row(win, PLACES[0], nautilus_sidebar)
-                return self._inject_native_sidebar_link(
-                    win,
-                    nautilus_sidebar,
-                    native_listbox,
-                    list_row,
-                    keep_at_bottom=DEBUG_SIDEBAR_MODE == "native-list-bottom",
-                )
-            _log("_inject_sidebar_link: native listbox unavailable, using separate list")
+        native_scrolled_window = self._find_sidebar_scrolled_window(
+            nautilus_sidebar, native_listbox
+        )
+        if native_scrolled_window is None:
+            _log("_inject_sidebar_link: native scrolled window unavailable")
+            return False
 
-        elif DEBUG_SIDEBAR_MODE == "inner-wrapper":
-            if native_listbox is not None:
-                native_scrolled_window = self._find_sidebar_scrolled_window(
-                    nautilus_sidebar, native_listbox
-                )
-                if native_scrolled_window is not None:
-                    return self._inject_inner_wrapper_sidebar_link(
-                        win,
-                        native_scrolled_window,
-                        native_listbox,
-                        nautilus_sidebar,
-                    )
-                _log(
-                    "_inject_sidebar_link: native scrolled window unavailable, using outer wrapper"
-                )
-            else:
-                _log("_inject_sidebar_link: native listbox unavailable, using outer wrapper")
+        # Guard: skip if we already wrapped this sidebar (double-injection).
+        existing = native_scrolled_window.get_child()
+        if existing is not None and existing.get_name() == "nautilus_my_computer_sidebar_wrapper":
+            _log("_inject_sidebar_link: wrapper already present, skipping")
+            return True
 
-        if native_listbox is not None:
-            _read_native_place_data(native_listbox)
-        our_listbox = self._build_places_sidebar_listbox(win, nautilus_sidebar)
-
-        wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-
-        outer_scroll = Gtk.ScrolledWindow()
-        outer_scroll.set_vexpand(True)
-        outer_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        outer_scroll.set_child(wrapper)
-
-        # set_content() unparents nautilus_sidebar; then we can append it to wrapper.
-        sidebar_toolbar.set_content(outer_scroll)
-        wrapper.append(our_listbox)
-        wrapper.append(nautilus_sidebar)
-
-        # Disable NautilusSidebar's own scroll so it expands to full height
-        # and our outer_scroll drives all scrolling.
-        native_listbox = None
-        for w in _all_widgets(nautilus_sidebar):
-            if isinstance(w, Gtk.ScrolledWindow):
-                w.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
-                w.set_margin_top(0)
-                _log("_inject_sidebar_link: inner scroll disabled ✓")
-            elif native_listbox is None and isinstance(w, Gtk.ListBox):
-                native_listbox = w
-
-        nautilus_sidebar.set_margin_top(0)
-        if native_listbox is not None:
-            native_listbox.add_css_class("places-sidebar-list")
-            _apply_places_hide_css(native_listbox, win.get_display())
-
-        # Mirror: native listboxes drive our selection so only one row appears
-        # highlighted across all sidebar sections at any time.
-        if native_listbox is not None:
-            self._wire_sidebar_cross_deselect(win, our_listbox, native_listbox, nautilus_sidebar)
-
-        self._wire_sidebar_drop_dimming(wrapper, our_listbox, native_listbox)
-
-        state = self._windows.get(win)
-        if state is not None:
-            state["sidebar_listbox"] = our_listbox
-            state["sidebar_row"] = our_listbox.get_row_at_index(0)
-            state["sidebar_native"] = False
-            state["sidebar_native_widget"] = nautilus_sidebar
-            state["sidebar_mode"] = "outer-wrapper"
-
-        _log("_inject_sidebar_link: outer scroll wrapper set as content ✓")
-        return True
+        return self._inject_separate_computer_row(
+            win, nautilus_sidebar, native_scrolled_window, native_listbox
+        )
 
     def _fix_pathbar_icon(self, win: Gtk.Window) -> bool:
         """Non-invasive chip icon update. Called on each title-change arrival at

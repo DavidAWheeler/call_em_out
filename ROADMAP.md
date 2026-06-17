@@ -4,6 +4,9 @@ Planned fixes, features, and improvements. Subject to change as the project evol
 
 ---
 
+## Currently
+- i18n: update translations for the new sidebar visibility settings
+
 ## Next up
 - fix: disk cards update on connect
 - fix: update disk bar after file transfer

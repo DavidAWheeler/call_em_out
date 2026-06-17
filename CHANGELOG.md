@@ -4,6 +4,27 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.7.3
+Stability release: reworks sidebar place handling to rely on native Nautilus rows
+wherever possible, removing a class of duplicate-row and flicker bugs.
+
+### Changed
+- Sidebar places (Home, Recent, Starred, Network, Trash) are no longer rebuilt as
+  custom rows. They stay fully native (icons, tooltips, context menus, drag-and-drop,
+  trash-full icon all maintained by Nautilus); sidebar-show-* settings now toggle the
+  visibility of the native row directly
+- Only the Computer row is still custom-built, in its own section above the native
+  sidebar list
+
+### Fixed
+- Duplicate Trash (and other native place) rows could appear after Nautilus reordered
+  its sidebar list (device mount/unmount, bookmark changes), caused by a positional
+  CSS hide rule that did not survive reorders
+- Computer row briefly disappearing during bookmark drag-and-drop
+- Computer row incorrectly accepting file drops
+
+---
+
 ## v0.7.2
 ### Docs
 - Updated README and new content and screenshots/visuals

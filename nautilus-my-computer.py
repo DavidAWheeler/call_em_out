@@ -79,7 +79,7 @@ DEBUG_SELFTEST = _flag("MC_SELFTEST", default=False)  # in-process navigation se
 
 # ── Extension metadata (keep in sync with pyproject.toml) ────────────────────
 EXT_NAME = "My Computer for Nautilus"
-EXT_VERSION = "0.7.3"
+EXT_VERSION = "0.7.4"
 EXT_AUTHOR = "Yann Masoch"
 EXT_LICENSE = "MIT"
 EXT_GITHUB = "https://github.com/yannmasoch/nautilus-my-computer"
@@ -318,7 +318,7 @@ def _computer_context_menu(ext, win, entry: PlaceEntry) -> ContextualMenu:
 # has no native equivalent, so it cannot be handled like the others below.
 PLACES: list[PlaceEntry] = [
     PlaceEntry(
-        name="computer",
+        name="my_computer",
         position=0,
         label=_LOCATION_TITLE,
         icon=COMPUTER_ICON,
@@ -378,7 +378,7 @@ NATIVE_PLACES: list[PlaceEntry] = [
 
 
 # Maps each place name to its GSettings key controlling sidebar visibility.
-# "computer" is intentionally absent -- it is always shown and has no toggle.
+# "my_computer" is intentionally absent -- it is always shown and has no toggle.
 _PLACE_VISIBILITY_KEYS: dict[str, str] = {
     "home": "sidebar-show-home",
     "recent": "sidebar-show-recent",
@@ -697,14 +697,14 @@ _CSS = b"""
 }
 """
 
-# Seam between our separate one-row Computer listbox and Nautilus' native list
+# Seam between the separate My Computer listbox and Nautilus' native list
 # directly below it. Both carry .navigation-sidebar (theme base padding 6px); the
 # + combinator zeroes the touching edges so the two lists read as one column.
 _CSS_SIDEBAR = b"""
-#nautilus_my_computer_section_locations.navigation-sidebar {
+#sidebar_my_computer_listbox.navigation-sidebar {
     padding-bottom: 0;
 }
-#nautilus_my_computer_section_locations.navigation-sidebar + .navigation-sidebar {
+#sidebar_my_computer_listbox.navigation-sidebar + .navigation-sidebar {
     padding-top: 0;
 }
 """
@@ -1585,6 +1585,23 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             files_widget.add_css_class("vanilla-diskinfo-view-hidden")
         else:
             files_widget.remove_css_class("vanilla-diskinfo-view-hidden")
+
+    def _set_computer_sidebar_selected(self, state: dict, selected: bool) -> bool:
+        my_computer_listbox = state.get("sidebar_my_computer_listbox")
+        sidebar_row = state.get("sidebar_row")
+        if my_computer_listbox is None or sidebar_row is None:
+            return GLib.SOURCE_REMOVE
+        try:
+            if sidebar_row.get_parent() is not my_computer_listbox:
+                return GLib.SOURCE_REMOVE
+            if selected:
+                if my_computer_listbox.get_selected_row() is not sidebar_row:
+                    my_computer_listbox.select_row(sidebar_row)
+            elif my_computer_listbox.get_selected_row() is sidebar_row:
+                my_computer_listbox.unselect_all()
+        except Exception:
+            pass
+        return GLib.SOURCE_REMOVE
 
     def _on_settings_changed(self, settings: Gio.Settings, key: str) -> None:
         if key == "start-on-disks":
@@ -2469,10 +2486,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                 GLib.idle_add(
                     lambda: [f.unselect_all() for f in state.get("section_flows", [])] and False
                 )
-                sidebar_lb = state.get("sidebar_listbox")
-                sidebar_row = state.get("sidebar_row")
-                if sidebar_lb and sidebar_row:
-                    GLib.idle_add(lambda lb=sidebar_lb, r=sidebar_row: lb.select_row(r) or False)
+
+            GLib.idle_add(self._set_computer_sidebar_selected, state, True)
 
             # Re-pin the chrome icons (path-bar chip + sidebar row) every time we
             # arrive at the computer view. This must run even when the overlay is
@@ -2499,6 +2514,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             sync = state.get("sidebar_sync")
             if callable(sync):
                 GLib.idle_add(lambda s=sync: (s(), False)[1])
+            else:
+                GLib.idle_add(self._set_computer_sidebar_selected, state, False)
             if not self._set_visible_view(state, VIEW_FILES, "title changed show files"):
                 return
             self._stop_usage_poll_if_idle()
@@ -3318,31 +3335,31 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         Builds one row per entry in PLACES (currently just Computer), rather than
         hardcoding the single row, so a future custom place only needs adding to
         PLACES."""
-        our_listbox = Gtk.ListBox()
-        our_listbox.set_name("nautilus_my_computer_section_locations")
-        our_listbox.add_css_class("navigation-sidebar")
-        our_listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        my_computer_listbox = Gtk.ListBox()
+        my_computer_listbox.set_name("sidebar_my_computer_listbox")
+        my_computer_listbox.add_css_class("navigation-sidebar")
+        my_computer_listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
         row_uris: dict[Gtk.ListBoxRow, str] = {}
         for entry in PLACES:
             row = self._build_place_sidebar_row(win, entry, nautilus_sidebar)
-            our_listbox.append(row)
+            my_computer_listbox.append(row)
             row_uris[row] = entry.uri
-        our_listbox.connect(
+        my_computer_listbox.connect(
             "row-activated", lambda _lb, row: self._navigate_to(row_uris.get(row, DISKS_URI), win)
         )
-        computer_row = our_listbox.get_row_at_index(0)
+        computer_row = my_computer_listbox.get_row_at_index(0)
 
-        # Wrap: our one-row list on top, the native list below, in the existing
+        # Wrap: the My Computer one-row list on top, the native list below, in the existing
         # scrolled window so both scroll together.
         wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        wrapper.set_name("nautilus_my_computer_sidebar_wrapper")
+        wrapper.set_name("sidebar_my_computer_wrapper")
         native_scrolled_window.set_child(wrapper)
-        wrapper.append(our_listbox)
+        wrapper.append(my_computer_listbox)
         wrapper.append(native_listbox)
 
-        # Cross-deselect: our Computer selection and any native section selection
+        # Cross-deselect: the My Computer selection and any native section selection
         # are mutually exclusive (GTK does not deselect across separate listboxes).
-        all_lbs = [our_listbox] + [
+        all_lbs = [my_computer_listbox] + [
             w for w in _all_widgets(nautilus_sidebar) if isinstance(w, Gtk.ListBox)
         ]
         _deselecting = [False]
@@ -3364,7 +3381,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         state = self._windows.get(win)
         if state is not None:
             state["sidebar_listbox"] = native_listbox
-            state["sidebar_our_listbox"] = our_listbox
+            state["sidebar_my_computer_listbox"] = my_computer_listbox
             state["sidebar_row"] = computer_row
             state["sidebar_native"] = True
             state["sidebar_native_widget"] = nautilus_sidebar
@@ -3508,7 +3525,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         # Guard: skip if we already wrapped this sidebar (double-injection).
         existing = native_scrolled_window.get_child()
-        if existing is not None and existing.get_name() == "nautilus_my_computer_sidebar_wrapper":
+        if existing is not None and existing.get_name() == "sidebar_my_computer_wrapper":
             _log("_inject_sidebar_link: wrapper already present, skipping")
             return True
 

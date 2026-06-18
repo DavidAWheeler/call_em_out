@@ -4,6 +4,17 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.7.4
+Small polish release for the Computer sidebar button.
+
+### Fixed
+- Computer sidebar button now stays selected while the Computer panel is open
+
+### Changed
+- Cleaned up internal sidebar code names and small maintenance details
+
+---
+
 ## v0.7.3
 Stability release: reworks sidebar place handling to rely on native Nautilus rows
 wherever possible, removing a class of duplicate-row and flicker bugs.

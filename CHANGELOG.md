@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.7.5
+Fixes a grid-view column collapse caused by long disk/device names.
+
+### Fixed
+- A long disk or device name (e.g. an MTP device path) could inflate every card's
+  width and collapse the grid view down to fewer columns than normal
+
+### Changed
+- List view now uses its own row layout, separate from the grid card: icon, name,
+  free/total text, and a wider usage bar on a single full-width line
+
+---
+
 ## v0.7.4
 Small polish release for the Computer sidebar button.
 

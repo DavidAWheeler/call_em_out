@@ -79,7 +79,7 @@ DEBUG_SELFTEST = _flag("MC_SELFTEST", default=False)  # in-process navigation se
 
 # ── Extension metadata (keep in sync with pyproject.toml) ────────────────────
 EXT_NAME = "My Computer for Nautilus"
-EXT_VERSION = "0.7.4"
+EXT_VERSION = "0.7.5"
 EXT_AUTHOR = "Yann Masoch"
 EXT_LICENSE = "MIT"
 EXT_GITHUB = "https://github.com/yannmasoch/nautilus-my-computer"
@@ -130,7 +130,8 @@ _SORT_POLL_MS = 250  # gvfs sort-metadata poll cadence (only while header is hov
 _STALE_RELEASE_FRAMES = 2  # keep detached panel generations alive across this many frame ticks
 
 _FLOW_COLS_GRID = 8  # max columns in grid (FlowBox) view
-_LIST_MAX_WIDTH = 450  # max width (px) of a card group in list view
+_CARD_WIDTH = 240  # fixed grid-card width (px); labels ellipsize within it
+_LIST_BAR_MAX_WIDTH = 240  # max width (px) of the usage bar at the end of a list-view row
 
 
 # Resolve the display name Nautilus shows in the title bar when at DISKS_URI,
@@ -1221,54 +1222,6 @@ def _repin_icon(img: Gtk.Image, icon_name: str) -> None:
     img._diskinfo_restoring = False
 
 
-class LeftClamp(Gtk.Widget):
-    """Constrain a single child to a maximum width, anchored to the left.
-
-    Adw.Clamp does the "grow up to a cap, then stop" behaviour we want but
-    always centres its child (no alignment property).  GTK4 CSS max-width is
-    not enforced as a layout constraint either.  This minimal layout widget
-    allocates its child at the left edge with width = min(available, max_width),
-    so it caps at max_width on wide windows yet still shrinks responsively when
-    the window is narrower.
-    """
-
-    __gtype_name__ = "DiskinfoLeftClamp"
-
-    def __init__(self, max_width: int):
-        super().__init__()
-        self._max_width = max_width
-        self._child = None
-
-    def set_child(self, child: Gtk.Widget) -> None:
-        if self._child is not None:
-            self._child.unparent()
-        self._child = child
-        if child is not None:
-            child.set_parent(self)
-
-    def do_measure(self, orientation, for_size):
-        if self._child is None:
-            return (0, 0, -1, -1)
-        if orientation == Gtk.Orientation.VERTICAL and for_size > self._max_width:
-            for_size = self._max_width
-        min_size, nat_size, min_base, nat_base = self._child.measure(orientation, for_size)
-        if orientation == Gtk.Orientation.HORIZONTAL:
-            nat_size = min(nat_size, self._max_width)
-            min_size = min(min_size, self._max_width)
-        return (min_size, nat_size, min_base, nat_base)
-
-    def do_size_allocate(self, width, height, baseline):
-        if self._child is None:
-            return
-        self._child.allocate(min(width, self._max_width), height, baseline, None)
-
-    def do_dispose(self):
-        if self._child is not None:
-            self._child.unparent()
-            self._child = None
-        Gtk.Widget.do_dispose(self)
-
-
 class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
     def __init__(self):
         super().__init__()
@@ -2283,16 +2236,17 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             section_flows.append(container)
 
             for m, origin_key in render_items:
-                card = self._build_disk_card(m, origin_key, win, card_widgets)
+                if is_list:
+                    card = self._build_disk_row(m, origin_key, win, card_widgets)
+                else:
+                    card = self._build_disk_card(m, origin_key, win, card_widgets)
+                    # Fix the grid-card width so the column count stays stable;
+                    # labels (max_width_chars=0) ellipsize to this width.
+                    card.set_size_request(_CARD_WIDTH, -1)
                 size_group.add_widget(card)
                 container.append(card)
 
-            if is_list:
-                clamp = LeftClamp(_LIST_MAX_WIDTH)
-                clamp.set_child(container)
-                grid_box.append(clamp)
-            else:
-                grid_box.append(container)
+            grid_box.append(container)
 
         old_grid_box = state.get("grid_box")
         state["grid_box"] = grid_box
@@ -2304,12 +2258,71 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         self._apply_bar_color()
 
-    def _build_disk_card(
-        self, m: MountInfo, group_key: str, win: Gtk.Window, card_widgets: dict
-    ) -> Gtk.Widget:
+    def _card_info(self, m: MountInfo) -> tuple:
+        """Compute (nav_uri, has_size, sub_text, bar_value) shared by both card layouts."""
         nav_uri = m.nav_uri or (
             Gio.File.new_for_path(m.mountpoint).get_uri() if m.mountpoint else ""
         )
+        has_size = m.total > 0
+        if not m.is_mounted:
+            sub_text = _("Not mounted")
+            bar_value = 0.0
+        elif has_size:
+            sub_text = _("{free} free of {total}").format(
+                free=_format_size(m.free), total=_format_size(m.total)
+            )
+            bar_value = min(m.percent / 100.0, 1.0)
+        else:
+            sub_text = nav_uri
+            bar_value = 0.0
+        return nav_uri, has_size, sub_text, bar_value
+
+    def _finish_card(
+        self,
+        card: Gtk.Widget,
+        m: MountInfo,
+        group_key: str,
+        win: Gtk.Window,
+        nav_uri: str,
+        bar: Gtk.LevelBar,
+        sub_lbl: Gtk.Label,
+        has_size: bool,
+        card_widgets: dict,
+    ) -> None:
+        """Tag, register, and wire up controllers shared by both card layouts."""
+        if m.mountpoint:
+            fstype_part = f" ({m.fstype})" if m.fstype and m.fstype not in _INTERNAL_FSTYPES else ""
+            card.set_tooltip_text(f"{m.mountpoint}{fstype_part}")
+
+        card._mount_key = m.key
+        card._nav_uri = nav_uri
+        card._disk_group = group_key
+
+        # Register bar and sublabel for O(1) in-place usage updates
+        card_widgets[m.key] = (
+            bar if has_size else None,
+            sub_lbl if has_size else None,
+        )
+
+        right_click = Gtk.GestureClick()
+        right_click.set_button(3)
+        right_click.connect("pressed", self._on_disk_right_clicked, win, card)
+        card.add_controller(right_click)
+
+        key_ctrl = Gtk.EventControllerKey()
+        key_ctrl.connect("key-pressed", self._on_row_key_pressed, win, card)
+        card.add_controller(key_ctrl)
+
+        if m.is_mounted and (m.mountpoint or m.nav_uri):
+            drop = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
+            drop.connect("motion", self._on_drop_motion)
+            drop.connect("drop", self._on_files_dropped, m, win)
+            card.add_controller(drop)
+
+    def _build_disk_card(
+        self, m: MountInfo, group_key: str, win: Gtk.Window, card_widgets: dict
+    ) -> Gtk.Widget:
+        nav_uri, has_size, sub_text, bar_value = self._card_info(m)
 
         card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         card.get_style_context().add_class("nautilus-view-cell")
@@ -2340,6 +2353,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         name_lbl = Gtk.Label(label=display_name)
         name_lbl.set_xalign(0.0)
         name_lbl.set_ellipsize(3)
+        name_lbl.set_max_width_chars(0)  # follow card width; ellipsize, don't inflate it
         details.append(name_lbl)
 
         bar = Gtk.LevelBar()
@@ -2347,63 +2361,82 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         bar.set_min_value(0.0)
         bar.set_max_value(1.0)
         bar.set_hexpand(True)
+        bar.set_value(bar_value)
+        bar.set_visible(has_size)
         bar.get_style_context().add_class("diskinfo-bar")
-
-        has_size = m.total > 0
-        if not m.is_mounted:
-            bar.set_visible(False)
-            sub_text = _("Not mounted")
-        elif has_size:
-            v = min(m.percent / 100.0, 1.0)
-            bar.set_value(v)
-            bar.set_visible(True)
-            sub_text = _("{free} free of {total}").format(
-                free=_format_size(m.free), total=_format_size(m.total)
-            )
-        else:
-            bar.set_visible(False)
-            sub_text = nav_uri
-
         details.append(bar)
 
         sub_lbl = Gtk.Label(label=sub_text)
         sub_lbl.set_xalign(0.0)
         sub_lbl.set_ellipsize(3)
+        sub_lbl.set_max_width_chars(0)
         sub_lbl.get_style_context().add_class("diskinfo-subtext")
         sub_lbl.get_style_context().add_class("caption")
         details.append(sub_lbl)
 
         card.append(details)
 
-        if m.mountpoint:
-            fstype_part = f" ({m.fstype})" if m.fstype and m.fstype not in _INTERNAL_FSTYPES else ""
-            card.set_tooltip_text(f"{m.mountpoint}{fstype_part}")
+        self._finish_card(card, m, group_key, win, nav_uri, bar, sub_lbl, has_size, card_widgets)
+        return card
 
-        card._mount_key = m.key
-        card._nav_uri = nav_uri
-        card._disk_group = group_key
+    def _build_disk_row(
+        self, m: MountInfo, group_key: str, win: Gtk.Window, card_widgets: dict
+    ) -> Gtk.Widget:
+        """List-view row: icon (half size), name, free/total text, bar -- single full-width line."""
+        nav_uri, has_size, sub_text, bar_value = self._card_info(m)
 
-        # Register bar and sublabel for O(1) in-place usage updates
-        card_widgets[m.key] = (
-            bar if has_size else None,
-            sub_lbl if has_size else None,
-        )
+        card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        card.get_style_context().add_class("nautilus-view-cell")
+        if not m.is_mounted:
+            card.get_style_context().add_class("unmounted")
+        card.set_margin_start(6)
+        card.set_margin_end(6)
+        card.set_margin_top(6)
+        card.set_margin_bottom(6)
+        card.set_focusable(True)
+        card.set_focus_on_click(True)
+        card.set_hexpand(True)
 
-        right_click = Gtk.GestureClick()
-        right_click.set_button(3)
-        right_click.connect("pressed", self._on_disk_right_clicked, win, card)
-        card.add_controller(right_click)
+        icon = Gtk.Image()
+        icon.set_pixel_size(_nautilus_icon_size() // 2)
+        icon.set_valign(Gtk.Align.CENTER)
+        if _gicon_renders(m.gio_icon):
+            icon.set_from_gicon(m.gio_icon)
+        else:
+            icon.set_from_icon_name(_GROUP_ICON.get(group_key, "drive-harddisk"))
+        card.append(icon)
 
-        key_ctrl = Gtk.EventControllerKey()
-        key_ctrl.connect("key-pressed", self._on_row_key_pressed, win, card)
-        card.add_controller(key_ctrl)
+        display_name = m.display_name or os.path.basename(m.mountpoint) or "/"
+        name_lbl = Gtk.Label(label=display_name)
+        name_lbl.set_xalign(0.0)
+        name_lbl.set_ellipsize(3)
+        name_lbl.set_valign(Gtk.Align.CENTER)
+        card.append(name_lbl)
 
-        if m.is_mounted and (m.mountpoint or m.nav_uri):
-            drop = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
-            drop.connect("motion", self._on_drop_motion)
-            drop.connect("drop", self._on_files_dropped, m, win)
-            card.add_controller(drop)
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        card.append(spacer)
 
+        sub_lbl = Gtk.Label(label=sub_text)
+        sub_lbl.set_xalign(1.0)
+        sub_lbl.set_ellipsize(3)
+        sub_lbl.set_valign(Gtk.Align.CENTER)
+        sub_lbl.get_style_context().add_class("diskinfo-subtext")
+        sub_lbl.get_style_context().add_class("caption")
+        card.append(sub_lbl)
+
+        bar = Gtk.LevelBar()
+        bar.set_mode(Gtk.LevelBarMode.CONTINUOUS)
+        bar.set_min_value(0.0)
+        bar.set_max_value(1.0)
+        bar.set_size_request(_LIST_BAR_MAX_WIDTH, -1)
+        bar.set_valign(Gtk.Align.CENTER)
+        bar.set_value(bar_value)
+        bar.set_visible(has_size)
+        bar.get_style_context().add_class("diskinfo-bar")
+        card.append(bar)
+
+        self._finish_card(card, m, group_key, win, nav_uri, bar, sub_lbl, has_size, card_widgets)
         return card
 
     def _on_card_activated(self, _flow_box, child: Gtk.FlowBoxChild, win: Gtk.Window) -> None:

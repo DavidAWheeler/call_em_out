@@ -22,6 +22,9 @@ Installer fixes for package-manager detection, plus more detailed system info.
 ### Changed
 - Installer's System section now shows the detected distribution name and
   version numbers for the package manager, `nautilus-python`, and `gettext`
+- Sidebar Computer group now shows all places by default (Home, Recent, Starred,
+  Network, Trash) instead of hiding Recent, Starred, and Network; users can still
+  toggle visibility via settings
 
 ---
 

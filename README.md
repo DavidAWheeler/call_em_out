@@ -128,6 +128,7 @@ My Computer is compatible with almost all custom GTK themes.
 | | Distro | GNOME Files | Status |
 |---|--------|-------------|--------|
 | ✅ | Arch | 50.2.2 | Fully working |
+| ✅ | openSUSE Tumbleweed | 50.2.2 | Fully working |
 | ✅ | Fedora 44 Workstation | 50.2.2 | Fully working |
 | ✅ | Fedora 44 Workstation | 50.0 | Fully working |
 | ✅ | Ubuntu 26.04 LTS | 50.0 | Fully working |

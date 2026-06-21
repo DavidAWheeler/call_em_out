@@ -76,10 +76,11 @@ DEBUG_SIDEBAR_MODE = _sidebar_mode(
 DEBUG_PATHBAR_ACTIVE = _flag("MC_PATHBAR")  # top URL bar: chip icon pinning
 DEBUG_SORT_WATCH_ACTIVE = _flag("MC_SORT_WATCH")  # top view-mode/sort buttons: sort metadata watch
 DEBUG_SELFTEST = _flag("MC_SELFTEST", default=False)  # in-process navigation self-test driver
+DETACH_SETTINGS_WINDOW = False  # testing toggle: True opens settings as a standalone window
 
 # ── Extension metadata (keep in sync with pyproject.toml) ────────────────────
 EXT_NAME = "My Computer for Nautilus"
-EXT_VERSION = "0.7.5"
+EXT_VERSION = "0.7.6"
 EXT_AUTHOR = "Yann Masoch"
 EXT_LICENSE = "MIT"
 EXT_GITHUB = "https://github.com/yannmasoch/nautilus-my-computer"
@@ -2940,9 +2941,12 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         if not self._gsettings:
             return
 
-        pref_win = Adw.PreferencesDialog()
+        detached = DETACH_SETTINGS_WINDOW or win is None
+        pref_win = Adw.PreferencesWindow() if detached else Adw.PreferencesDialog()
         pref_win.set_title(PREFS_WIN_TITLE)
         pref_win.set_search_enabled(False)
+        if detached:
+            pref_win.set_default_size(680, 760)
 
         page = Adw.PreferencesPage()
         pref_win.add(page)
@@ -3123,7 +3127,10 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         github_row.add_suffix(github_btn)
         about_group.add(github_row)
 
-        pref_win.present(win)
+        if detached:
+            pref_win.present()
+        else:
+            pref_win.present(win)
 
     def _navigate_to_disks(self, win: Gtk.Window) -> None:
         """Navigate a window to computer:/// at startup, retrying until the slot

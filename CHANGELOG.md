@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.7.6
+Icon-accuracy fixes for disk cards.
+
+### Fixed
+- Disc-group cards (mounted ISO images) now always show the optical disc icon
+  instead of a generic removable-media icon, since `udisks` tags loop-mounted
+  ISOs the same way it tags plain removable drives
+- A drive icon wrapped in an emblem (e.g. a readonly/encrypted badge) with no
+  resolvable base icon name no longer renders blank; it now falls back to the
+  group's default icon
+
+---
+
 ## v0.7.5
 Fixes a grid-view column collapse caused by long disk/device names.
 

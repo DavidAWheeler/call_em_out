@@ -23,13 +23,13 @@ msgid "System"
 msgstr "System"
 
 msgid "Removable"
-msgstr "Entfernbar"
+msgstr "Wechselmedien"
 
 msgid "Disc"
 msgstr "Datenträger"
 
-msgid "Network Volumes"
-msgstr "Netzwerk-Volumes"
+msgid "Network"
+msgstr "Netzwerk"
 
 #——————————————————————————————
 # Panel - Disk card
@@ -74,10 +74,26 @@ msgstr "Formatieren…"
 #——————————————————————————————
 
 msgid "Computer"
-msgstr "Computer"
+msgstr "Rechner"
 
 msgid "Open My Computer"
 msgstr "My Computer öffnen"
+
+#——————————————————————————————
+# Sidebar - Places
+#——————————————————————————————
+
+msgid "Home"
+msgstr "Persönlicher Ordner"
+
+msgid "Recent"
+msgstr "Zuletzt"
+
+msgid "Starred"
+msgstr "Favoriten"
+
+msgid "Trash"
+msgstr "Papierkorb"
 
 #——————————————————————————————
 # Preferences - General
@@ -93,7 +109,7 @@ msgid "Start on the Computer view"
 msgstr "In der Computeransicht starten"
 
 msgid "Launch directly to the Computer view instead of Home"
-msgstr "Starte direkt in der Computeransicht statt auf der Startseite"
+msgstr "Starte direkt in der Computeransicht statt den persönlichen Ordner zu öffnen"
 
 #——————————————————————————————
 # Preferences - Bar Color
@@ -109,7 +125,7 @@ msgid "Color mode"
 msgstr "Farbmodus"
 
 msgid "System accent"
-msgstr "Akzentfarbe"
+msgstr "System-Akzentfarbe"
 
 msgid "Custom color"
 msgstr "Benutzerdefinierte Farbe"

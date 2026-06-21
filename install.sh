@@ -84,14 +84,119 @@ fi
 PM=""
 NP_PKG=""
 
-detect_pm() {
-    if   command -v pacman  >/dev/null 2>&1; then PM=pacman;  NP_PKG="python-nautilus"
-    elif command -v apt-get >/dev/null 2>&1; then PM=apt;     NP_PKG="python3-nautilus"
-    elif command -v dnf     >/dev/null 2>&1; then PM=dnf;     NP_PKG="nautilus-python"
-    elif command -v zypper  >/dev/null 2>&1; then PM=zypper;  NP_PKG="python313-nautilus"
-    else die "Cannot detect package manager. Install nautilus-python manually and re-run."
+set_pm() {
+    case "$1" in
+        pacman) bin=pacman;  PM=pacman; NP_PKG="python-nautilus"  ;;
+        apt)    bin=apt-get; PM=apt;    NP_PKG="python3-nautilus" ;;
+        dnf)    bin=dnf;     PM=dnf;    NP_PKG="nautilus-python"  ;;
+        zypper) bin=zypper;  PM=zypper; NP_PKG="python3-nautilus" ;;
+        *)      return 1 ;;
+    esac
+    command -v "$bin" >/dev/null 2>&1
+}
+
+detect_os() {
+    if [ -r /etc/os-release ]; then
+        # shellcheck disable=SC1091
+        pretty=$(. /etc/os-release; echo "${PRETTY_NAME:-}")
+        if [ -n "$pretty" ]; then
+            line "Distribution" "$pretty"
+            return
+        fi
     fi
-    line "Package manager" "$PM"
+    line "Distribution" "$(uname -sr)"
+}
+
+pm_version() {
+    case "$PM" in
+        pacman) pacman --version 2>/dev/null | grep -o 'Pacman v[0-9.]*' | head -1 | cut -d' ' -f2 | sed 's/^v//' ;;
+        apt)    apt-get --version 2>/dev/null | head -1 | awk '{print $2}' ;;
+        dnf)    dnf --version 2>/dev/null | head -1 | grep -oE '[0-9]+(\.[0-9]+)+' | head -1 ;;
+        zypper) zypper --version 2>/dev/null | awk '{print $2}' ;;
+    esac
+}
+
+pkg_version() {
+    case "$PM" in
+        pacman)         pacman -Q "$1" 2>/dev/null | awk '{print $2}' ;;
+        apt)            dpkg-query -W -f='${Version}' "$1" 2>/dev/null ;;
+        dnf|zypper)     rpm -q --qf '%{VERSION}-%{RELEASE}\n' "$1" 2>/dev/null ;;
+    esac
+}
+
+gettext_version() {
+    msgfmt --version 2>/dev/null | head -1 | awk '{print $NF}'
+}
+
+# Map an os-release ID or ID_LIKE token to a package manager.
+pm_for_distro() {
+    case "$1" in
+        arch|archlinux|manjaro|endeavouros|garuda)       echo pacman ;;
+        debian|ubuntu|linuxmint|pop|elementary|raspbian) echo apt ;;
+        fedora|rhel|centos|rocky|almalinux|nobara)       echo dnf ;;
+        opensuse*|suse|sles)                             echo zypper ;;
+        *) return 1 ;;
+    esac
+}
+
+# openSUSE flavors the binding by the default Python: python313-nautilus on
+# current Tumbleweed, python3-nautilus on Leap/older (PR #33, @mendres82). That
+# name isn't stable across Python bumps, so try candidates and keep the first
+# zypper actually has.
+resolve_zypper_pkg() {
+    [ "$PM" = zypper ] || return 0
+    v=$(python3 -c 'import sys; print("%d%d" % sys.version_info[:2])' 2>/dev/null)
+    for cand in ${v:+python${v}-nautilus} python3-nautilus python-nautilus; do
+        if zypper --non-interactive search --match-exact "$cand" >/dev/null 2>&1; then
+            NP_PKG="$cand"
+            return 0
+        fi
+    done
+    # Nothing resolved (offline / stale repos): best guess for current Tumbleweed.
+    NP_PKG="${v:+python${v}-nautilus}"
+    [ -n "$NP_PKG" ] || NP_PKG="python3-nautilus"
+}
+
+detect_pm() {
+    # Prefer the distro's native package manager (os-release) over raw $PATH
+    # detection: Fedora etc. may ship apt/dpkg for .deb tooling (issue #27).
+    if [ -r /etc/os-release ]; then
+        # Read ID/ID_LIKE in subshells so sourcing os-release cannot clobber the
+        # script's own globals (it also defines VERSION, NAME, ...). Both keys are
+        # optional per the spec, hence the ${:-} guards under set -u.
+        # shellcheck disable=SC1091
+        distro_id=$(. /etc/os-release; echo "${ID:-}")
+        # shellcheck disable=SC1091
+        distro_like=$(. /etc/os-release; echo "${ID_LIKE:-}")
+        # Guard the standalone assignment: pm_for_distro returns non-zero for an
+        # unknown ID, which would abort under set -e instead of falling through
+        # to the binary-presence detection below.
+        pm=$(pm_for_distro "$distro_id") || pm=""
+        [ -n "$pm" ] && set_pm "$pm" || pm=""
+        if [ -z "$pm" ]; then
+            for like in $distro_like; do
+                pm=$(pm_for_distro "$like") && set_pm "$pm" && break
+                pm=""
+            done
+        fi
+    fi
+    # Fallback: binary presence. Native RPM/zypper managers take precedence
+    # over apt-get, which is often present only as secondary .deb tooling.
+    if [ -z "$PM" ]; then
+        if   set_pm dnf;    then :
+        elif set_pm zypper; then :
+        elif set_pm pacman; then :
+        elif set_pm apt;    then :
+        else die "Cannot detect package manager. Install nautilus-python manually and re-run."
+        fi
+    fi
+    resolve_zypper_pkg
+    pmver=$(pm_version)
+    if [ -n "$pmver" ]; then
+        line "Package manager" "$PM ($pmver)"
+    else
+        line "Package manager" "$PM"
+    fi
 }
 
 nautilus_python_installed() {
@@ -105,7 +210,9 @@ nautilus_python_installed() {
 
 ensure_nautilus_python() {
     if nautilus_python_installed; then
-        line "$NP_PKG" "detected"; return
+        ver=$(pkg_version "$NP_PKG")
+        line "$NP_PKG" "$([ -n "$ver" ] && echo "detected ($ver)" || echo "detected")"
+        return
     fi
     line "$NP_PKG" "not found, installing..."
     case "$PM" in
@@ -115,12 +222,15 @@ ensure_nautilus_python() {
         zypper) $SUDO zypper install -y "$NP_PKG" ;;
     esac
     nautilus_python_installed || die "$NP_PKG installation failed."
-    line "$NP_PKG" "installed"
+    ver=$(pkg_version "$NP_PKG")
+    line "$NP_PKG" "$([ -n "$ver" ] && echo "installed ($ver)" || echo "installed")"
 }
 
 ensure_gettext() {
     if command -v msgfmt >/dev/null 2>&1; then
-        line "gettext" "detected"; return
+        gver=$(gettext_version)
+        line "gettext" "$([ -n "$gver" ] && echo "detected ($gver)" || echo "detected")"
+        return
     fi
     line "gettext" "not found, installing..."
     case "$PM" in
@@ -130,7 +240,8 @@ ensure_gettext() {
         zypper) $SUDO zypper install -y gettext-tools ;;
     esac
     if command -v msgfmt >/dev/null 2>&1; then
-        line "gettext" "installed"
+        gver=$(gettext_version)
+        line "gettext" "$([ -n "$gver" ] && echo "installed ($gver)" || echo "installed")"
     else
         line "gettext" "install failed, translations will be skipped"
     fi
@@ -281,6 +392,7 @@ do_install() {
 
     echo ""
     printf '%s\n' "${BOLD}System${RESET}"
+    detect_os
     detect_pm
     ensure_nautilus_python
     ensure_gettext
@@ -343,7 +455,7 @@ do_uninstall() {
 # --- Entry point ---
 echo ""
 printf '%s\n' "${BOLD}Nautilus My Computer Installer${RESET}"
-printf '──────────────────────────────\n'
+printf -- '------------------------------\n'
 
 case "$MODE" in
     install)   do_install ;;

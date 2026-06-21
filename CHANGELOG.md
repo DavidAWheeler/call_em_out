@@ -4,6 +4,27 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.7.7
+Installer fixes for package-manager detection, plus more detailed system info.
+
+### Fixed
+- Installer picked `apt` over `dnf` on Fedora systems that have `apt`/`dpkg`
+  installed for unrelated `.deb` tooling, causing the install to fail
+  outright (credit @sam-eon, issue #27)
+- openSUSE package name for the Nautilus Python bindings was outdated for
+  current Tumbleweed (credit @mendres82, PR #33); installer now resolves the
+  correct name across Tumbleweed, Leap, and future Python version bumps
+- Installer could abort entirely on Linux distributions not explicitly listed
+  in its detection table, instead of falling back to binary-presence detection
+- Installer could silently overwrite its own `--version` argument when reading
+  `/etc/os-release` on distributions that define a `VERSION` key
+
+### Changed
+- Installer's System section now shows the detected distribution name and
+  version numbers for the package manager, `nautilus-python`, and `gettext`
+
+---
+
 ## v0.7.6
 Icon-accuracy fixes for disk cards.
 

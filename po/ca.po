@@ -28,8 +28,8 @@ msgstr "Extraïble"
 msgid "Disc"
 msgstr "Disc"
 
-msgid "Network Volumes"
-msgstr "Volums de xarxa"
+msgid "Network"
+msgstr "Xarxa"
 
 #——————————————————————————————
 # Panel - Disk card
@@ -80,6 +80,22 @@ msgid "Open My Computer"
 msgstr "Obrir Ordinador"
 
 #——————————————————————————————
+# Sidebar - Places
+#——————————————————————————————
+
+msgid "Home"
+msgstr "Carpeta de l'usuari"
+
+msgid "Recent"
+msgstr "Recent"
+
+msgid "Starred"
+msgstr "Destacat"
+
+msgid "Trash"
+msgstr "Paperera"
+
+#——————————————————————————————
 # Preferences - General
 #——————————————————————————————
 
@@ -93,7 +109,7 @@ msgid "Start on the Computer view"
 msgstr "Inicia a la vista Ordinador"
 
 msgid "Launch directly to the Computer view instead of Home"
-msgstr "Obre directament la vista Ordinador en lloc de l'Inici"
+msgstr "Obre directament la vista Ordinador en lloc de la carpeta de l'usuari"
 
 #——————————————————————————————
 # Preferences - Bar Color
@@ -127,11 +143,11 @@ msgid "End color"
 msgstr "Color final"
 
 #——————————————————————————————
-# Preferences - Visibility
+# Preferences - Panel visibility
 #——————————————————————————————
 
-msgid "Visibility"
-msgstr "Visibilitat"
+msgid "Panel visibility"
+msgstr "Visibilitat del panell"
 
 msgid "Choose how each group appears. Visible: shows the group as a normal separated section. Merged: folds the group into the On this Computer group. Hidden: hides the group entirely."
 msgstr "Trieu com apareix cada grup. Visible: mostra el grup com una secció separada normal. Integrat: integra el grup dins del grup En aquest ordinador. Ocult: amaga completament el grup."
@@ -154,6 +170,16 @@ msgstr "Mostra les particions del sistema"
 
 msgid "Include boot and EFI partitions in the System group"
 msgstr "Inclou les particions d'arrencada i EFI al grup Sistema"
+
+#——————————————————————————————
+# Preferences - Sidebar visibility
+#——————————————————————————————
+
+msgid "Sidebar visibility"
+msgstr "Visibilitat de la barra lateral"
+
+msgid "Choose which locations appear on the sidebar."
+msgstr "Trieu quines ubicacions apareixen a la barra lateral."
 
 #——————————————————————————————
 # Preferences - About

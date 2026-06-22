@@ -28,8 +28,9 @@ msgstr "Çıkarılabilir"
 msgid "Disc"
 msgstr "Disk"
 
-msgid "Network Volumes"
-msgstr "Ağ Birimleri"
+# Previous translation (before rename from "Network Volumes"): Ağ Birimleri
+msgid "Network"
+msgstr ""
 
 # ——————————————————————————————
 # Panel - Disk card
@@ -77,6 +78,21 @@ msgid "Open My Computer"
 msgstr "Bilgisayarımı Aç"
 
 # ——————————————————————————————
+# Sidebar - Places
+# ——————————————————————————————
+msgid "Home"
+msgstr ""
+
+msgid "Recent"
+msgstr ""
+
+msgid "Starred"
+msgstr ""
+
+msgid "Trash"
+msgstr ""
+
+# ——————————————————————————————
 # Preferences - General
 # ——————————————————————————————
 msgid "My Computer Settings"
@@ -122,10 +138,11 @@ msgid "End color"
 msgstr "Bitiş rengi"
 
 # ——————————————————————————————
-# Preferences - Visibility
+# Preferences - Panel visibility
 # ——————————————————————————————
-msgid "Visibility"
-msgstr "Görünürlük"
+# Previous translation (before rename from "Visibility"): Görünürlük
+msgid "Panel visibility"
+msgstr ""
 
 msgid ""
 "Choose how each group appears. Visible: shows the group as a normal "
@@ -153,6 +170,15 @@ msgstr "Sistem bölümlerini göster"
 
 msgid "Include boot and EFI partitions in the System group"
 msgstr "Önyükleme ve EFI bölümlerini Sistem grubuna dahil et"
+
+# ——————————————————————————————
+# Preferences - Sidebar visibility
+# ——————————————————————————————
+msgid "Sidebar visibility"
+msgstr ""
+
+msgid "Choose which locations appear on the sidebar."
+msgstr ""
 
 # ——————————————————————————————
 # Preferences - About

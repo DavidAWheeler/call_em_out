@@ -28,8 +28,8 @@ msgstr "Rimovibile"
 msgid "Disc"
 msgstr "Disco"
 
-msgid "Network Volumes"
-msgstr "Volumi di rete"
+msgid "Network"
+msgstr "Rete"
 
 #——————————————————————————————
 # Panel - Disk card
@@ -80,6 +80,22 @@ msgid "Open My Computer"
 msgstr "Apri Computer"
 
 #——————————————————————————————
+# Sidebar - Places
+#——————————————————————————————
+
+msgid "Home"
+msgstr "Home"
+
+msgid "Recent"
+msgstr "Recenti"
+
+msgid "Starred"
+msgstr "Preferiti"
+
+msgid "Trash"
+msgstr "Cestino"
+
+#——————————————————————————————
 # Preferences - General
 #——————————————————————————————
 
@@ -127,11 +143,11 @@ msgid "End color"
 msgstr "Colore finale"
 
 #——————————————————————————————
-# Preferences - Visibility
+# Preferences - Panel visibility
 #——————————————————————————————
 
-msgid "Visibility"
-msgstr "Visibilità"
+msgid "Panel visibility"
+msgstr "Visibilità del pannello"
 
 msgid "Choose how each group appears. Visible: shows the group as a normal separated section. Merged: folds the group into the On this Computer group. Hidden: hides the group entirely."
 msgstr "Scegli come appare ogni gruppo. Visibile: mostra il gruppo come una normale sezione separata. Integrato: unisce il gruppo al gruppo In questo computer. Nascosto: nasconde completamente il gruppo."
@@ -154,6 +170,16 @@ msgstr "Mostra le partizioni di sistema"
 
 msgid "Include boot and EFI partitions in the System group"
 msgstr "Includi le partizioni di avvio ed EFI nel gruppo Sistema"
+
+#——————————————————————————————
+# Preferences - Sidebar visibility
+#——————————————————————————————
+
+msgid "Sidebar visibility"
+msgstr "Visibilità della barra laterale"
+
+msgid "Choose which locations appear on the sidebar."
+msgstr "Scegli quali posizioni mostrare nella barra laterale."
 
 #——————————————————————————————
 # Preferences - About

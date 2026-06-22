@@ -28,8 +28,8 @@ msgstr "Extraíble"
 msgid "Disc"
 msgstr "Disco"
 
-msgid "Network Volumes"
-msgstr "Volúmenes de red"
+msgid "Network"
+msgstr "Red"
 
 #——————————————————————————————
 # Panel - Disk card
@@ -80,6 +80,22 @@ msgid "Open My Computer"
 msgstr "Abrir Equipo"
 
 #——————————————————————————————
+# Sidebar - Places
+#——————————————————————————————
+
+msgid "Home"
+msgstr "Carpeta personal"
+
+msgid "Recent"
+msgstr "Recientes"
+
+msgid "Starred"
+msgstr "Destacados"
+
+msgid "Trash"
+msgstr "Papelera"
+
+#——————————————————————————————
 # Preferences - General
 #——————————————————————————————
 
@@ -93,7 +109,7 @@ msgid "Start on the Computer view"
 msgstr "Iniciar en la vista Equipo"
 
 msgid "Launch directly to the Computer view instead of Home"
-msgstr "Lanzar directamente a la vista Equipo en vez de Carpeta personnal"
+msgstr "Lanzar directamente a la vista Equipo en vez de Carpeta personal"
 
 #——————————————————————————————
 # Preferences - Bar Color
@@ -127,11 +143,11 @@ msgid "End color"
 msgstr "Color final"
 
 #——————————————————————————————
-# Preferences - Visibility
+# Preferences - Panel visibility
 #——————————————————————————————
 
-msgid "Visibility"
-msgstr "Visibilidad"
+msgid "Panel visibility"
+msgstr "Visibilidad del panel"
 
 msgid "Choose how each group appears. Visible: shows the group as a normal separated section. Merged: folds the group into the On this Computer group. Hidden: hides the group entirely."
 msgstr "Elige cómo aparece cada grupo. Visible: muestra el grupo como una sección separada normal. Fusionado: agrupa las entradas en el grupo En este equipo. Oculto: oculta el grupo por completo."
@@ -154,6 +170,16 @@ msgstr "Mostrar particiones del sistema"
 
 msgid "Include boot and EFI partitions in the System group"
 msgstr "Incluir las particiones de arranque y EFI en el grupo Sistema"
+
+#——————————————————————————————
+# Preferences - Sidebar visibility
+#——————————————————————————————
+
+msgid "Sidebar visibility"
+msgstr "Visibilidad de la barra lateral"
+
+msgid "Choose which locations appear on the sidebar."
+msgstr "Elige qué ubicaciones aparecen en la barra lateral."
 
 #——————————————————————————————
 # Preferences - About

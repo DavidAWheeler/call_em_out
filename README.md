@@ -152,6 +152,7 @@ Both left-to-right (LTR) and right-to-left (RTL) layouts are supported. The pane
 | Italian | `it` | LTR |
 | Korean | `ko` | LTR |
 | Portuguese | `pt` | LTR |
+| Russian | `ru` | LTR |
 | Spanish | `es` | LTR |
 | Turkish | `tr` | LTR |
 

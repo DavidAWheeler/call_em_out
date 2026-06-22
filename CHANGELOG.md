@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.7.10
+
+### Internationalization
+- Russian translation (credit @fish-dd, PR #40)
+- German translation fixes for consistency (credit @crian, PR #39)
+
+---
+
 ## v0.7.9
 
 ### Fixed

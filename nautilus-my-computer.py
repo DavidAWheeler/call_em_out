@@ -453,7 +453,7 @@ def _disk_context_menu(ext, win, m) -> ContextualMenu:
         ]
 
     # Section 1: mount / unmount / eject + format (non-system only).
-    if not is_system and m.mountpoint != "/home":
+    if not is_system and not (m.mountpoint == "/home" or m.mountpoint.startswith("/home/")):
         if not is_mounted and m.can_mount:
             items.append(MenuItem(_("Mount"), action=lambda: ext._do_mount(m, win), section=1))
         elif m.can_eject:
@@ -3196,7 +3196,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         self, win: Gtk.Window, entry: PlaceEntry, nautilus_sidebar: Gtk.Widget | None = None
     ) -> Gtk.ListBoxRow:
         # Only the Computer row is built here (it has no native equivalent). Every
-        # other place stays native; we just toggle its native row's visibility.
+        # other place stays native; we only hide the ones toggled off via settings.
+
         row_label = entry.label
         row_tooltip = entry.tooltip
         icon_name = entry.icon

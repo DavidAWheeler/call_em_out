@@ -408,12 +408,11 @@ def _disk_context_menu(ext, win, m) -> ContextualMenu:
     """Build a disk card's right-click menu from live mount state.
 
     Same three-section layout as before: open actions, then mount/eject/unmount +
-    format (non-system), then Properties (mounted only). Unmounted disks mount
-    first, then open in the requested target.
+    format (skipped for protected system/home mounts), then Properties (mounted
+    only). Unmounted disks mount first, then open in the requested target.
     """
     nav_uri = m.nav_uri or (Gio.File.new_for_path(m.mountpoint).get_uri() if m.mountpoint else "")
     is_mounted = m.is_mounted
-    is_system = _is_system_mount(m)
     device = m.device or ""
     if not device.startswith("/dev/") and m.gio_volume:
         unix_dev = m.gio_volume.get_identifier(Gio.VOLUME_IDENTIFIER_KIND_UNIX_DEVICE)
@@ -454,8 +453,8 @@ def _disk_context_menu(ext, win, m) -> ContextualMenu:
             ),
         ]
 
-    # Section 1: mount / unmount / eject + format (non-system only).
-    if not is_system and not (m.mountpoint == "/home" or m.mountpoint.startswith("/home/")):
+    # Section 1: mount / unmount / eject + format (non-protected only).
+    if not _is_protected_mount(m):
         if not is_mounted:
             if m.can_mount:
                 items.append(MenuItem(_("Mount"), action=lambda: ext._do_mount(m, win), section=1))
@@ -583,6 +582,29 @@ def _is_system_mount(m: MountInfo) -> bool:
     return (
         m.mountpoint == "/" or m.mountpoint in ("/boot", "/boot/efi", "/efi") or m.fstype == "swap"
     )
+
+
+def _is_protected_mount(m: MountInfo) -> bool:
+    """True if Unmount/Eject/Format should be hidden for this mount.
+
+    Used only for context-menu action gating, not display grouping - unlike
+    _is_system_mount, a protected mount may still appear under "On this Computer".
+    Backed by Gio.unix_mount_is_system_internal(), the same heuristic GNOME uses,
+    so it covers most system mounts across distros without a hardcoded list. Two
+    cases it can miss, kept as an explicit fallback: a per-user /home/<user> mount
+    (e.g. encrypted home) which the signal doesn't flag but is still home; and the
+    EFI System Partition, which some distros mount without marking it internal.
+    """
+    if m.is_gio or not m.mountpoint.startswith("/"):
+        return False
+    if m.mountpoint == "/home" or m.mountpoint.startswith("/home/"):
+        return True
+    if m.mountpoint in ("/boot/efi", "/efi"):
+        return True
+    entry = Gio.unix_mount_at(m.mountpoint)
+    if isinstance(entry, tuple):
+        entry = entry[0]
+    return bool(entry and Gio.unix_mount_is_system_internal(entry))
 
 
 def _classify_mount(m: MountInfo) -> str:

@@ -3196,8 +3196,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         self, win: Gtk.Window, entry: PlaceEntry, nautilus_sidebar: Gtk.Widget | None = None
     ) -> Gtk.ListBoxRow:
         # Only the Computer row is built here (it has no native equivalent). Every
-        # other place stays native; we only hide the ones toggled off via settings.
-
+        # other place stays native; we just toggle its native row's visibility.
         row_label = entry.label
         row_tooltip = entry.tooltip
         icon_name = entry.icon

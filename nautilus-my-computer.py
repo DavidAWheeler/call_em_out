@@ -80,7 +80,7 @@ DETACH_SETTINGS_WINDOW = False  # testing toggle: True opens settings as a stand
 
 # ── Extension metadata (keep in sync with pyproject.toml) ────────────────────
 EXT_NAME = "My Computer for Nautilus"
-EXT_VERSION = "0.7.11"
+EXT_VERSION = "0.7.12"
 EXT_AUTHOR = "Yann Masoch"
 EXT_LICENSE = "MIT"
 EXT_GITHUB = "https://github.com/yannmasoch/nautilus-my-computer"
@@ -408,12 +408,11 @@ def _disk_context_menu(ext, win, m) -> ContextualMenu:
     """Build a disk card's right-click menu from live mount state.
 
     Same three-section layout as before: open actions, then mount/eject/unmount +
-    format (non-system), then Properties (mounted only). Unmounted disks mount
-    first, then open in the requested target.
+    format (skipped for protected system/home mounts), then Properties (mounted
+    only). Unmounted disks mount first, then open in the requested target.
     """
     nav_uri = m.nav_uri or (Gio.File.new_for_path(m.mountpoint).get_uri() if m.mountpoint else "")
     is_mounted = m.is_mounted
-    is_system = m.mountpoint == "/"
     device = m.device or ""
     if not device.startswith("/dev/") and m.gio_volume:
         unix_dev = m.gio_volume.get_identifier(Gio.VOLUME_IDENTIFIER_KIND_UNIX_DEVICE)
@@ -454,13 +453,14 @@ def _disk_context_menu(ext, win, m) -> ContextualMenu:
             ),
         ]
 
-    # Section 1: mount / unmount / eject + format (non-system only).
-    if not is_system:
+    # Section 1: mount / unmount / eject + format (non-protected only).
+    if not _is_protected_mount(m):
         if not is_mounted:
-            items.append(MenuItem(_("Mount"), action=lambda: ext._do_mount(m, win), section=1))
+            if m.can_mount:
+                items.append(MenuItem(_("Mount"), action=lambda: ext._do_mount(m, win), section=1))
         elif m.can_eject:
             items.append(MenuItem(_("Eject"), action=lambda: ext._do_eject(m), section=1))
-        else:
+        elif m.can_unmount:
             items.append(MenuItem(_("Unmount"), action=lambda: ext._do_unmount(m), section=1))
         if device.startswith("/dev/"):
             items.append(MenuItem(_("Format…"), action=lambda: ext._do_format(device), section=1))
@@ -511,6 +511,8 @@ class MountInfo:
     is_mounted: bool = True
     is_removable: bool = False
     can_eject: bool = False
+    can_mount: bool = False
+    can_unmount: bool = False
     is_network_place: bool = False
 
     # Right-click menu factory menu(ext, win, m) -> ContextualMenu (built at show-time).
@@ -580,6 +582,29 @@ def _is_system_mount(m: MountInfo) -> bool:
     return (
         m.mountpoint == "/" or m.mountpoint in ("/boot", "/boot/efi", "/efi") or m.fstype == "swap"
     )
+
+
+def _is_protected_mount(m: MountInfo) -> bool:
+    """True if Unmount/Eject/Format should be hidden for this mount.
+
+    Used only for context-menu action gating, not display grouping - unlike
+    _is_system_mount, a protected mount may still appear under "On this Computer".
+    Backed by Gio.unix_mount_is_system_internal(), the same heuristic GNOME uses,
+    so it covers most system mounts across distros without a hardcoded list. Two
+    cases it can miss, kept as an explicit fallback: a per-user /home/<user> mount
+    (e.g. encrypted home) which the signal doesn't flag but is still home; and the
+    EFI System Partition, which some distros mount without marking it internal.
+    """
+    if m.is_gio or not m.mountpoint.startswith("/"):
+        return False
+    if m.mountpoint == "/home" or m.mountpoint.startswith("/home/"):
+        return True
+    if m.mountpoint in ("/boot/efi", "/efi"):
+        return True
+    entry = Gio.unix_mount_at(m.mountpoint)
+    if isinstance(entry, tuple):
+        entry = entry[0]
+    return bool(entry and Gio.unix_mount_is_system_internal(entry))
 
 
 def _classify_mount(m: MountInfo) -> str:
@@ -913,6 +938,7 @@ def _scan_mounts(show_system_partitions: bool = False) -> list[MountInfo]:
                                 or (gio_mount and gio_mount.can_eject())
                                 or (gio_drive and gio_drive.can_eject())
                             ),
+                            can_unmount=bool(gio_mount and gio_mount.can_unmount()),
                         )
                     )
                 except OSError:
@@ -978,6 +1004,7 @@ def _scan_gio_mounts() -> list[MountInfo]:
                         or mount.can_eject()
                         or (gio_drive and gio_drive.can_eject())
                     ),
+                    can_unmount=bool(mount.can_unmount()),
                 )
             )
     except Exception:
@@ -1017,6 +1044,7 @@ def _scan_gio_volumes() -> list[MountInfo]:
                     gio_icon=volume.get_icon(),
                     gio_volume=volume,
                     can_eject=bool(volume.can_eject() or (drive and drive.can_eject())),
+                    can_mount=bool(volume.can_mount()),
                 )
             )
     except Exception:
@@ -2801,7 +2829,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         subprocess.Popen(["nautilus", "--new-window", mountpoint])
 
     def _do_mount(self, m: MountInfo, win: Gtk.Window) -> None:
-        if not m or not m.gio_volume:
+        if not m or not m.gio_volume or not m.can_mount:
             return
         op = Gio.MountOperation.new()
         m.gio_volume.mount(Gio.MountMountFlags.NONE, op, None, self._on_mount_finish, win)
@@ -2814,7 +2842,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         GLib.idle_add(self._repopulate_visible)
 
     def _do_mount_then_open(self, m: MountInfo, win: Gtk.Window, mode: str) -> None:
-        if not m or not m.gio_volume:
+        if not m or not m.gio_volume or not m.can_mount:
             return
         op = Gio.MountOperation.new()
         op.set_password_save(Gio.PasswordSave.NEVER)
@@ -2844,7 +2872,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             GLib.idle_add(self._do_open, uri, win)
 
     def _do_unmount(self, m: MountInfo) -> None:
-        if not m or not m.gio_mount:
+        if not m or not m.gio_mount or not m.can_unmount:
             return
         op = Gio.MountOperation.new()
         m.gio_mount.unmount_with_operation(

@@ -1,204 +1,206 @@
+#
+# Pelach András <pelach.andras@gmail.com>, 2026.
+#
 msgid ""
 msgstr ""
 "Project-Id-Version: nautilus-my-computer\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-06-01 00:00+0200\n"
-"PO-Revision-Date: 2026-06-22 00:17+0300\n"
-"Last-Translator: Taylan Tatlı\n"
-"Language-Team: Turkish\n"
-"Language: tr\n"
+"PO-Revision-Date: 2026-06-22 20:56+0200\n"
+"Last-Translator: Pelach András <pelach.andras@gmail.com>\n"
+"Language-Team: Hungarian\n"
+"Language: hu\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"X-Generator: Poedit 3.9\n"
+"X-Generator: Gtranslator 48.0\n"
 
 # ——————————————————————————————
 # Panel - Group labels
 # ——————————————————————————————
 msgid "On this Computer"
-msgstr "Bu Bilgisayarda"
+msgstr "Számítógép"
 
 msgid "System"
-msgstr "Sistem"
+msgstr "Rendszer"
 
 msgid "Removable"
-msgstr "Çıkarılabilir"
+msgstr "Eltávolítható"
 
 msgid "Disc"
-msgstr "Disk"
+msgstr "Lemez"
 
-# Previous translation (before rename from "Network Volumes"): Ağ Birimleri
 msgid "Network"
-msgstr "Ağ"
+msgstr "Hálózat"
 
 # ——————————————————————————————
 # Panel - Disk card
 # ——————————————————————————————
 msgid "{free} free of {total}"
-msgstr "{total} alanda {free} boş"
+msgstr "{free} szabad {total}-ból"
 
 msgid "Not mounted"
-msgstr "Bağlanmamış"
+msgstr "Nincs csatolva"
 
 # ——————————————————————————————
 # Panel - Disk card actions
 # ——————————————————————————————
 msgid "Open"
-msgstr "Aç"
+msgstr "Megynitás"
 
 msgid "Open in New Tab"
-msgstr "Yeni Sekmede Aç"
+msgstr "Megnyitás új lapon"
 
 msgid "Open in New Window"
-msgstr "Yeni Pencerede Aç"
+msgstr "Megnyitás új ablakban"
 
 msgid "Mount"
-msgstr "Bağla"
+msgstr "Csatolás"
 
 msgid "Unmount"
-msgstr "Bağlantıyı Kes"
+msgstr "Leválasztás"
 
 msgid "Eject"
-msgstr "Çıkar"
+msgstr "Kiadás"
 
 msgid "Properties"
-msgstr "Özellikler"
+msgstr "Tuajdonságok"
 
 msgid "Format…"
-msgstr "Biçimlendir..."
+msgstr "Formázás…"
 
 # ——————————————————————————————
 # Sidebar
 # ——————————————————————————————
 msgid "Computer"
-msgstr "Bilgisayar"
+msgstr "Számítógép"
 
 msgid "Open My Computer"
-msgstr "Bilgisayarımı Aç"
+msgstr "Saját gép nyitása"
 
 # ——————————————————————————————
 # Sidebar - Places
 # ——————————————————————————————
 msgid "Home"
-msgstr "Ev"
+msgstr "Saját mappa"
 
 msgid "Recent"
-msgstr "Son"
+msgstr "Legutóbbi"
 
 msgid "Starred"
-msgstr "Yıldızlı"
+msgstr "Csillagozott"
 
 msgid "Trash"
-msgstr "Çöp"
+msgstr "Kuka"
 
 # ——————————————————————————————
 # Preferences - General
 # ——————————————————————————————
 msgid "My Computer Settings"
-msgstr "Bilgisayarım Ayarları"
+msgstr "Számítógép beállítása"
 
 msgid "General"
-msgstr "Genel"
+msgstr "Általános"
 
 msgid "Start on the Computer view"
-msgstr "Bilgisayar görünümünde başlat"
+msgstr "Számítógép nézetben indul"
 
 msgid "Launch directly to the Computer view instead of Home"
-msgstr "Ev yerine doğrudan Bilgisayar görünümünü aç"
+msgstr "Közvetlenül a Számítógép nézetbe indítás a Kezdőlap helyett"
 
 # ——————————————————————————————
 # Preferences - Bar Color
 # ——————————————————————————————
 msgid "Bar Color"
-msgstr "Çubuk Rengi"
+msgstr "Sáv színe"
 
 msgid "Select or customize the bar color."
-msgstr "Çubuk rengini seçin veya özelleştirin."
+msgstr "Válassza ki vagy szabja testre a sáv színét."
 
 msgid "Color mode"
-msgstr "Renk modu"
+msgstr "Szín mód"
 
 msgid "System accent"
-msgstr "Sistem vurgu rengi"
+msgstr "Rendszer színek használata"
 
 msgid "Custom color"
-msgstr "Özel renk"
+msgstr "Választott szín"
 
 msgid "Custom gradient"
-msgstr "Özel gradyan"
+msgstr "Váasztott színátmenet"
 
 msgid "Color"
-msgstr "Renk"
+msgstr "Szín"
 
 msgid "Start color"
-msgstr "Başlangıç rengi"
+msgstr "Induló szín"
 
 msgid "End color"
-msgstr "Bitiş rengi"
+msgstr "Záró szín"
 
 # ——————————————————————————————
 # Preferences - Panel visibility
 # ——————————————————————————————
 msgid "Panel visibility"
-msgstr "Panel görünürlüğü"
+msgstr "Panel láthatóság"
 
 msgid ""
 "Choose how each group appears. Visible: shows the group as a normal "
 "separated section. Merged: folds the group into the On this Computer group. "
 "Hidden: hides the group entirely."
 msgstr ""
-"Her grubun nasıl görüneceğini seçin. Görünür: grubu normal, ayrı bir bölüm "
-"olarak gösterir. Birleştirilmiş: grubu Bu Bilgisayarda grubunun içine "
-"toplar. Gizli: grubu tamamen gizler."
+"Válassza ki, hogyan jelenjenek meg az egyes csoportok. Látható: a csoportot "
+"normál, elkülönített szakaszként jeleníti meg. Egyesített: a csoportot az "
+"Ezen a számítógépen csoportba rakja. Rejtett: teljesen elrejti a csoportot."
 
 msgid "Visible"
-msgstr "Görünür"
+msgstr "Látható"
 
 msgid "Merged"
-msgstr "Birleştirilmiş"
+msgstr "Egyesített"
 
 msgid "Hidden"
-msgstr "Gizli"
+msgstr "Rejtett"
 
 # ——————————————————————————————
 # Preferences - System
 # ——————————————————————————————
 msgid "Show system partitions"
-msgstr "Sistem bölümlerini göster"
+msgstr "Látható rendszer partició"
 
 msgid "Include boot and EFI partitions in the System group"
-msgstr "Önyükleme ve EFI bölümlerini Sistem grubuna dahil et"
+msgstr "A rendszerindító és az EFI partíciók hozzáadása a Rendszer csoporthoz"
 
 # ——————————————————————————————
 # Preferences - Sidebar visibility
 # ——————————————————————————————
 msgid "Sidebar visibility"
-msgstr "Kenar çubuğu görünürlüğü"
+msgstr "Oldalsáv láthatósága"
 
 msgid "Choose which locations appear on the sidebar."
-msgstr "Kenar çubuğunda hangi konumların görüneceğini seçin."
+msgstr "Válassza ki, hogy mely helyek jelenjenek meg az oldalsávon."
 
 # ——————————————————————————————
 # Preferences - About
 # ——————————————————————————————
 msgid "About"
-msgstr "Hakkında"
+msgstr "Névjegy"
 
 msgid "Extension"
-msgstr "Eklenti"
+msgstr "Kiterjesztés"
 
 msgid "Version"
-msgstr "Sürüm"
+msgstr "Verzió"
 
 msgid "Author"
-msgstr "Yazar"
+msgstr "Szerző"
 
 msgid "License"
-msgstr "Lisans"
+msgstr "Licensz"
 
 msgid "Source code"
-msgstr "Kaynak kodu"
+msgstr "Forráskód"
 
 msgid "GitHub"
 msgstr "GitHub"

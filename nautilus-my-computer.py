@@ -1020,9 +1020,7 @@ def _scan_gio_volumes() -> list[MountInfo]:
                     gio_icon=volume.get_icon(),
                     gio_volume=volume,
                     can_eject=bool(volume.can_eject() or (drive and drive.can_eject())),
-                    can_mount=bool(
-                        getattr(volume, "can_mount", lambda: False)() if volume else False
-                    ),
+                    can_mount=bool(volume.can_mount()),
                 )
             )
     except Exception:

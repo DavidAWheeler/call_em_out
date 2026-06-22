@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.7.9
+
+### Fixed
+- Disk cards required a double-click to open even when Nautilus's "Single click
+  to open items" preference was set; cards now follow the `click-policy` GSettings
+  key live, the same way they already follow grid/list view mode (credit
+  @MoshiurRahmanAdib, issue #28)
+
+---
+
 ## v0.7.8
 
 ### Internationalization

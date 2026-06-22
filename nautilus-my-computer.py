@@ -80,7 +80,7 @@ DETACH_SETTINGS_WINDOW = False  # testing toggle: True opens settings as a stand
 
 # ── Extension metadata (keep in sync with pyproject.toml) ────────────────────
 EXT_NAME = "My Computer for Nautilus"
-EXT_VERSION = "0.7.8"
+EXT_VERSION = "0.7.9"
 EXT_AUTHOR = "Yann Masoch"
 EXT_LICENSE = "MIT"
 EXT_GITHUB = "https://github.com/yannmasoch/nautilus-my-computer"
@@ -1238,6 +1238,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         self._sort_column: str = "name"
         self._sort_reverse: bool = False
         self._view_mode: str = "icon-view"
+        self._click_policy: str = "double"  # Nautilus "click-policy": 'single' or 'double'
         # Sort is read from per-folder GVfs metadata. There is no usable event
         # for it (the metadata daemon writes via mmap so file monitors never
         # fire, and the GTK4 Python bindings don't expose get_action_group, so
@@ -1701,18 +1702,20 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         return GLib.SOURCE_CONTINUE
 
     def _read_view_mode(self) -> None:
-        """Read current view mode from Nautilus preferences GSettings."""
+        """Read current view mode and click policy from Nautilus preferences."""
         try:
             settings = Gio.Settings.new("org.gnome.nautilus.preferences")
             self._view_mode = settings.get_string("default-folder-viewer")
+            self._click_policy = settings.get_string("click-policy")
         except Exception:
             pass
 
     def _watch_view_mode(self) -> None:
-        """Subscribe to GSettings so view-mode changes are instant, not polled."""
+        """Subscribe to GSettings so view-mode/click-policy changes are instant."""
         try:
             settings = Gio.Settings.new("org.gnome.nautilus.preferences")
             settings.connect("changed::default-folder-viewer", self._on_view_mode_changed)
+            settings.connect("changed::click-policy", self._on_click_policy_changed)
             self._nautilus_prefs = settings  # keep reference
         except Exception:
             pass
@@ -1722,6 +1725,13 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         self._view_mode = settings.get_string("default-folder-viewer")
         if self._view_mode != prev:
             _log(f"view changed → mode='{self._view_mode}'")
+            self._repopulate_visible()
+
+    def _on_click_policy_changed(self, settings: Gio.Settings, _key: str) -> None:
+        prev = self._click_policy
+        self._click_policy = settings.get_string("click-policy")
+        if self._click_policy != prev:
+            _log(f"click-policy changed → '{self._click_policy}'")
             self._repopulate_visible()
 
     # ── Live-refresh helpers ──────────────────────────────────────────────────
@@ -2228,7 +2238,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             container.set_row_spacing(6)
             container.set_margin_bottom(12)
             container.set_selection_mode(Gtk.SelectionMode.SINGLE)
-            container.set_activate_on_single_click(False)
+            # Follow Nautilus's "click-policy": single-click opens when set to 'single'.
+            container.set_activate_on_single_click(self._click_policy == "single")
             container.set_hexpand(True)
             container.set_valign(Gtk.Align.START)
 

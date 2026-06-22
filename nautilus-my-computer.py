@@ -80,13 +80,14 @@ DETACH_SETTINGS_WINDOW = False  # testing toggle: True opens settings as a stand
 
 # ── Extension metadata (keep in sync with pyproject.toml) ────────────────────
 EXT_NAME = "My Computer for Nautilus"
-EXT_VERSION = "0.7.12"
+EXT_VERSION = "0.7.13"
 EXT_AUTHOR = "Yann Masoch"
 EXT_LICENSE = "MIT"
 EXT_GITHUB = "https://github.com/yannmasoch/nautilus-my-computer"
 
 
 DISKS_URI = "computer:///"
+_DISKS_FILE = Gio.File.new_for_uri(DISKS_URI)
 COMPUTER_LABEL = _("Computer")
 COMPUTER_ICON = "computer-symbolic"  # icon used in sidebar and path bar
 MENU_ITEM_LABEL = _("My Computer Settings")
@@ -1137,6 +1138,32 @@ def _all_widgets(widget):
     while child:
         yield from _all_widgets(child)
         child = child.get_next_sibling()
+
+
+def _window_is_at_disks(win) -> bool:
+    """True if the window's active slot is currently showing DISKS_URI.
+
+    Reads the NautilusWindowSlot "location" GFile property on demand. No
+    persistent signal, no set_child (safe re: issue #11). Prefers the active
+    slot so tabs are handled; falls back to the first slot with a location.
+    """
+    fallback = None
+    for w in _all_widgets(win):
+        if "Slot" not in type(w).__name__:
+            continue
+        try:
+            loc = w.get_property("location")
+        except TypeError:
+            continue
+        if loc is None:
+            continue
+        try:
+            if w.get_property("active"):
+                return loc.equal(_DISKS_FILE)
+        except TypeError:
+            pass
+        fallback = loc
+    return fallback is not None and fallback.equal(_DISKS_FILE)
 
 
 def _find_widget(root, *, buildable_id=None, class_name=None, css_class=None, site=""):
@@ -2518,7 +2545,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             return
 
         current_title = win.get_title() or ""
-        in_view = _LOCATION_TITLE in current_title
+        in_view = _window_is_at_disks(win)
 
         # A transient/empty title ("Loading…") means the window hasn't resolved
         # its location yet. Never act on it: it must not consume the one-shot
@@ -3188,7 +3215,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             st = self._windows.get(win)
             if st is None:
                 return GLib.SOURCE_REMOVE
-            if _LOCATION_TITLE in (win.get_title() or ""):
+            if _window_is_at_disks(win):
                 st["awaiting_disks"] = False  # arrived
                 return GLib.SOURCE_REMOVE
             attempts[0] += 1

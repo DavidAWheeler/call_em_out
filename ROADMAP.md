@@ -5,11 +5,9 @@ Planned fixes, features, and improvements. Subject to change as the project evol
 ---
 
 ## Currently
-- fix: opening a folder whose name contains "Computer" (e.g. "OK Computer/CD 1")
-  incorrectly shows the Computer view instead of the folder (#38)
+- feat: custom symbolic icons for user bookmarks (#23)
 
 ## Next up
-- feat: custom symbolic icons for user bookmarks (#23)
 - fix: compatibility with Zorin OS
 - fix: Computer doesn't appear after install on Bazzite/Silverblue-style images (#41)
 - fix: misaligned sidebar icon and text (#22)

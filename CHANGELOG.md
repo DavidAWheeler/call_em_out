@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.7.13
+
+### Fixed
+- Opening a folder whose name contains "Computer" (e.g. an album folder named
+  "OK Computer") no longer shows the My Computer view instead of the folder's
+  contents; detection now checks the actual `computer:///` location instead of
+  matching the window title text (credit @funinkina, issue #38)
+
+---
+
 ## v0.7.12
 
 ### Fixed

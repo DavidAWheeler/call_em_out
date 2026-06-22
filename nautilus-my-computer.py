@@ -1166,6 +1166,22 @@ def _window_is_at_disks(win) -> bool:
     return fallback is not None and fallback.equal(_DISKS_FILE)
 
 
+def _menu_section_with_action(model, action_name):
+    """Return the section GMenu of `model` that contains an item bound to
+    `action_name`, or None. Used to append into a native menu's existing group
+    (e.g. the Remove/Rename section) rather than tacking on a new section."""
+    str_type = GLib.VariantType.new("s")
+    for i in range(model.get_n_items()):
+        section = model.get_item_link(i, Gio.MENU_LINK_SECTION)
+        if section is None:
+            continue
+        for j in range(section.get_n_items()):
+            av = section.get_item_attribute_value(j, "action", str_type)
+            if av is not None and av.get_string() == action_name:
+                return section
+    return None
+
+
 def _find_widget(root, *, buildable_id=None, class_name=None, css_class=None, site=""):
     """Find a widget by layered fallback: buildable_id → class_name → css_class.
 
@@ -3494,6 +3510,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         # Hide native place rows the user toggled off, and re-apply on rebuilds.
         self._apply_native_place_visibility(native_listbox)
+        self._attach_bookmark_context_menus(win, native_listbox)  # TEST: change-icon entry
         self._watch_native_list_changes(win, native_listbox)
 
         self._wire_computer_drop_dimming(wrapper, computer_row)
@@ -3568,6 +3585,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         def _rescan() -> bool:
             state["native_hide_pending"] = False
             self._apply_native_place_visibility(native_listbox)
+            self._attach_bookmark_context_menus(win, native_listbox)  # TEST: change-icon entry
             return GLib.SOURCE_REMOVE
 
         def _on_items_changed(*_a) -> None:
@@ -3580,6 +3598,201 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         # Keep refs alive for the window's lifetime so the model is not collected.
         state["native_hide_model"] = model
         state["native_hide_handler"] = handler_id
+
+    # ── TEST: per-bookmark "Change Icon" context-menu entry ───────────────────
+    # Temporary scaffolding for issue #23. Adds a "Change Icon…" item to the
+    # NATIVE bookmark context menu instead of replacing it. Nautilus rebuilds the
+    # row popover fresh on each right-click (nautilus-sidebar.c: show_row_popover
+    # -> create_row_popover, a GtkPopoverMenu parented to the NautilusSidebar). We
+    # fire a capture-phase gesture (before native), then on idle - once the native
+    # popover exists - append our item to its live GMenu model. Remove before release.
+
+    def _gtk_bookmark_uris(self) -> set:
+        """The user's bookmark URIs from ~/.config/gtk-3.0/bookmarks (trailing
+        slash stripped), used to tell real bookmarks apart from mounted volumes
+        and built-in places (which also carry file:// URIs)."""
+        path = os.path.join(GLib.get_user_config_dir(), "gtk-3.0", "bookmarks")
+        uris = set()
+        try:
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        uris.add(line.split(maxsplit=1)[0].rstrip("/"))
+        except OSError:
+            pass
+        return uris
+
+    def _attach_bookmark_context_menus(self, win: Gtk.Window, native_listbox: Gtk.ListBox) -> None:
+        """Attach a button-3 menu to each native bookmark row. Idempotent: a
+        per-row flag prevents double-attaching, and rows Nautilus rebuilds get a
+        fresh controller on the next pass (re-armed from _watch_native_list_changes)."""
+        bookmark_uris = self._gtk_bookmark_uris()
+        if not bookmark_uris:
+            return
+        idx = 0
+        while (row := native_listbox.get_row_at_index(idx)) is not None:
+            idx += 1
+            if getattr(row, "_mc_bookmark_menu", False):
+                continue
+            try:
+                uri = row.get_property("uri")
+            except Exception:
+                uri = None
+            if not uri or uri.rstrip("/") not in bookmark_uris:
+                continue
+            try:
+                label = row.get_property("label") or uri
+            except Exception:
+                label = uri
+            gesture = Gtk.GestureClick()
+            gesture.set_button(3)
+            # Nautilus builds the row popover on RELEASE (nautilus-sidebar.c:
+            # on_row_released -> show_row_popover), not press. Capture phase so we
+            # fire alongside native; idle then lands right after the popover exists.
+            gesture.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+            gesture.connect("released", self._on_bookmark_menu_augment, uri, label, win, row)
+            row.add_controller(gesture)
+            row._mc_bookmark_menu = True
+            _log(f"_attach_bookmark_context_menus: armed bookmark row uri={uri}")
+
+    def _on_bookmark_menu_augment(self, _gesture, _n, _x, _y, uri, label, win, row) -> None:
+        # Do NOT claim the event: Nautilus must still build its native menu. We
+        # only piggyback an extra item once that menu exists (next idle tick).
+        GLib.idle_add(self._inject_change_icon_item, win, uri, label, row)
+
+    def _inject_change_icon_item(self, win: Gtk.Window, uri: str, label: str, row) -> bool:
+        state = self._windows.get(win)
+        sidebar = state.get("sidebar_native_widget") if state else None
+        if sidebar is None:
+            return GLib.SOURCE_REMOVE
+        popover = None
+        for w in _all_widgets(sidebar):
+            if isinstance(w, Gtk.PopoverMenu) and w.get_mapped():
+                popover = w  # sidebar->popover, the row menu just built natively
+        if popover is None:
+            _log("_inject_change_icon_item: native popover not found")
+            return GLib.SOURCE_REMOVE
+        if getattr(popover, "_mc_injected", False):
+            return GLib.SOURCE_REMOVE
+        model = popover.get_menu_model()
+        if not isinstance(model, Gio.Menu):
+            _log(f"_inject_change_icon_item: model is {type(model).__name__}, not Gio.Menu")
+            return GLib.SOURCE_REMOVE
+
+        # Append to the native Remove/Rename section so the item sits in that group
+        # (after Rename), not in a separate block at the bottom. Find it by the
+        # row.rename action rather than a hard-coded index. Appending fires
+        # items-changed, so the already-mapped GtkPopoverMenu rebuilds and shows it.
+        section = _menu_section_with_action(model, "row.rename")
+        if not isinstance(section, Gio.Menu):
+            _log("_inject_change_icon_item: Remove/Rename section not found, using own section")
+            section = Gio.Menu()
+            model.append_section(None, section)
+        section.append(_("Change Icon"), "mcbookmark.change-icon")
+
+        ag = Gio.SimpleActionGroup()
+        act = Gio.SimpleAction.new("change-icon", None)
+        act.connect("activate", lambda *_a: self._test_change_bookmark_icon(win, uri, label, row))
+        ag.add_action(act)
+        popover.insert_action_group("mcbookmark", ag)
+        popover._mc_injected = True
+        _log(f"_inject_change_icon_item: added Change Icon to native menu uri={uri}")
+        return GLib.SOURCE_REMOVE
+
+    def _test_change_bookmark_icon(self, win: Gtk.Window, uri: str, label: str, row) -> None:
+        """Placeholder action: confirms the entry fires, reports the bookmark, and
+        offers a button to apply a random Adwaita places symbolic icon to the row's
+        start-icon, to demonstrate that bookmark rows accept icon changes at all.
+
+        Matches native Rename's presentation (nautilus-sidebar.c:
+        create_rename_popover / show_rename_popover): a Gtk.Popover parented to
+        the row, arrow pointing at it, GTK_POS_RIGHT - not a centered modal
+        dialog. A plain Gtk.Popover (not GtkPopoverMenu) so the button can be
+        clicked repeatedly without the popover auto-closing."""
+        _log(f"_test_change_bookmark_icon: uri={uri} label={label}")
+        popover = Gtk.Popover()
+        popover.set_parent(row)
+        popover.set_position(Gtk.PositionType.RIGHT)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+        box.set_margin_start(10)
+        box.set_margin_end(10)
+
+        title = Gtk.Label(label=_("Change Icon (test)"))
+        title.add_css_class("heading")
+        title.set_xalign(0.0)
+        box.append(title)
+
+        info = Gtk.Label(label=_("Bookmark: %(label)s") % {"label": label})
+        info.add_css_class("caption")
+        info.add_css_class("dim-label")
+        info.set_xalign(0.0)
+        box.append(info)
+
+        search_entry = Gtk.SearchEntry()
+        search_entry.set_placeholder_text(_("Search icons…"))
+        # Gtk.Popover closes on Escape natively (same as the native rename
+        # popover), but GtkSearchEntry intercepts Escape first to clear/stop
+        # its own search and never lets it bubble up. Forward it explicitly so
+        # Escape closes this popover too, matching native behaviour.
+        search_entry.connect("stop-search", lambda _e: popover.popdown())
+        box.append(search_entry)
+
+        flow = Gtk.FlowBox()
+        flow.set_selection_mode(Gtk.SelectionMode.NONE)
+        flow.set_max_children_per_line(6)
+        flow.set_min_children_per_line(6)
+        flow.set_homogeneous(True)
+        flow.set_row_spacing(4)
+        flow.set_column_spacing(4)
+        # Anchor to the start corner (top-left, or top-right under RTL) instead
+        # of the FlowBox's default fill/center, so a filtered-down result sits
+        # at the corner rather than floating in the middle of the popover.
+        flow.set_valign(Gtk.Align.START)
+        is_rtl = flow.get_direction() == Gtk.TextDirection.RTL
+        flow.set_halign(Gtk.Align.END if is_rtl else Gtk.Align.START)
+        theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+        all_symbolic = sorted(n for n in theme.get_icon_names() if n.endswith("-symbolic"))
+        for icon_name in all_symbolic:
+            icon_button = Gtk.Button()
+            icon_button.add_css_class("flat")
+            icon_button.set_tooltip_text(icon_name)
+            icon_button.set_size_request(36, 36)
+            icon_button.set_child(Gtk.Image.new_from_icon_name(icon_name))
+            icon_button.connect("clicked", self._on_test_icon_picked, row, icon_name)
+            child = Gtk.FlowBoxChild()
+            child.set_child(icon_button)
+            child._mc_icon_name = icon_name
+            flow.append(child)
+
+        def _filter_icons(child) -> bool:
+            query = search_entry.get_text().strip().lower()
+            return not query or query in child._mc_icon_name.lower()
+
+        flow.set_filter_func(_filter_icons)
+        search_entry.connect("search-changed", lambda _e: flow.invalidate_filter())
+
+        # Locked to 6 columns; viewport sized to show ~6 rows, rest reachable
+        # via the vertical scrollbar since the full theme is 1000+ icons.
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_size_request(260, 260)
+        scrolled.set_child(flow)
+        box.append(scrolled)
+
+        popover.set_child(box)
+        popover.connect("closed", lambda p: p.unparent())
+        popover.popup()
+
+    def _on_test_icon_picked(self, _button, row, icon_name: str) -> None:
+        try:
+            row.set_property("start-icon", Gio.ThemedIcon.new(icon_name))
+            _log(f"_on_test_icon_picked: applied {icon_name} to row")
+        except Exception as e:
+            _log(f"_on_test_icon_picked: failed to set start-icon ({e})")
 
     def _apply_native_place_visibility(self, native_listbox: Gtk.ListBox) -> None:
         """Instance shim so call sites can use self; delegates to the helper."""

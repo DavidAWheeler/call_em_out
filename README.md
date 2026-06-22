@@ -149,6 +149,7 @@ Both left-to-right (LTR) and right-to-left (RTL) layouts are supported. The pane
 | Catalan | `ca` | LTR |
 | French | `fr` | LTR |
 | German | `de` | LTR |
+| Hungarian | `hu` | LTR |
 | Italian | `it` | LTR |
 | Korean | `ko` | LTR |
 | Portuguese | `pt` | LTR |

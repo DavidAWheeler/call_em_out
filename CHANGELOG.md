@@ -4,6 +4,15 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.7.11
+
+### Internationalization
+- Hungarian translation (credit @pelach, PR #42)
+- Turkish translation completed, filling in previously untranslated strings
+  (credit @TaylanTatli, PR #43)
+
+---
+
 ## v0.7.10
 
 ### Internationalization

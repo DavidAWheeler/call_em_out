@@ -135,6 +135,11 @@ _FLOW_COLS_GRID = 8  # max columns in grid (FlowBox) view
 _CARD_WIDTH = 240  # fixed grid-card width (px); labels ellipsize within it
 _LIST_BAR_MAX_WIDTH = 240  # max width (px) of the usage bar at the end of a list-view row
 
+_ICON_PICKER_COLS = 6  # bookmark icon-picker grid: visible columns
+_ICON_PICKER_ROWS = 5  # bookmark icon-picker grid: visible rows before scrolling
+_ICON_PICKER_CELL_SIZE = 36  # px, square cell (FlowBoxChild) holding one icon
+_ICON_PICKER_SPACING = 4  # px, row/column spacing between cells
+
 
 # Resolve the display name Nautilus shows in the title bar when at DISKS_URI,
 # so panel detection works regardless of which URI is configured.
@@ -707,6 +712,9 @@ _CSS = b"""
 .diskinfo-panel {
 }
 .diskinfo-panel flowbox {
+    --accent-bg-color: var(--diskinfo-selection-grey);
+}
+.mc-icon-grid {
     --accent-bg-color: var(--diskinfo-selection-grey);
 }
 .diskinfo-subtext {
@@ -1294,6 +1302,25 @@ def _repin_icon(img: Gtk.Image, icon_name: str) -> None:
     img._diskinfo_restoring = False
 
 
+def _find_row_start_image(row: Gtk.Widget) -> Gtk.Image | None:
+    """Find a NautilusSidebarRow's start-icon Gtk.Image, skipping the eject
+    button's image (same in_button walk as _build_place_sidebar_row's
+    _pin_row_icon)."""
+    for w in _all_widgets(row):
+        if not isinstance(w, Gtk.Image):
+            continue
+        parent = w.get_parent()
+        in_button = False
+        while parent and parent is not row:
+            if isinstance(parent, Gtk.Button):
+                in_button = True
+                break
+            parent = parent.get_parent()
+        if not in_button:
+            return w
+    return None
+
+
 class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
     def __init__(self):
         super().__init__()
@@ -1648,6 +1675,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         elif key.startswith("sidebar-show-"):
             # Sidebar place toggle -- re-apply native row visibility in every window.
             GLib.idle_add(self._reapply_sidebar_visibility)
+        elif key == "custom-bookmark-icons":
+            # Another window customized a bookmark icon -- re-apply everywhere.
+            GLib.idle_add(self._reapply_bookmark_icons_all_windows)
 
     def _apply_bar_color(self) -> None:
         if not self._gsettings or self._bar_css_display is None:
@@ -3510,7 +3540,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         # Hide native place rows the user toggled off, and re-apply on rebuilds.
         self._apply_native_place_visibility(native_listbox)
-        self._attach_bookmark_context_menus(win, native_listbox)  # TEST: change-icon entry
+        self._attach_bookmark_context_menus(win, native_listbox)
+        self._apply_bookmark_icons(native_listbox)
         self._watch_native_list_changes(win, native_listbox)
 
         self._wire_computer_drop_dimming(wrapper, computer_row)
@@ -3585,7 +3616,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         def _rescan() -> bool:
             state["native_hide_pending"] = False
             self._apply_native_place_visibility(native_listbox)
-            self._attach_bookmark_context_menus(win, native_listbox)  # TEST: change-icon entry
+            self._attach_bookmark_context_menus(win, native_listbox)
+            self._apply_bookmark_icons(native_listbox)
             return GLib.SOURCE_REMOVE
 
         def _on_items_changed(*_a) -> None:
@@ -3599,13 +3631,13 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         state["native_hide_model"] = model
         state["native_hide_handler"] = handler_id
 
-    # ── TEST: per-bookmark "Change Icon" context-menu entry ───────────────────
-    # Temporary scaffolding for issue #23. Adds a "Change Icon…" item to the
-    # NATIVE bookmark context menu instead of replacing it. Nautilus rebuilds the
-    # row popover fresh on each right-click (nautilus-sidebar.c: show_row_popover
-    # -> create_row_popover, a GtkPopoverMenu parented to the NautilusSidebar). We
-    # fire a capture-phase gesture (before native), then on idle - once the native
-    # popover exists - append our item to its live GMenu model. Remove before release.
+    # ── Per-bookmark custom icons (issue #23) ──────────────────────────────────
+    # Adds a "Change Icon" item to the NATIVE bookmark context menu instead of
+    # replacing it. Nautilus rebuilds the row popover fresh on each right-click
+    # (nautilus-sidebar.c: show_row_popover -> create_row_popover, a
+    # GtkPopoverMenu parented to the NautilusSidebar). We fire a capture-phase
+    # gesture (before native), then on idle - once the native popover exists -
+    # append our item to its live GMenu model.
 
     def _gtk_bookmark_uris(self) -> set:
         """The user's bookmark URIs from ~/.config/gtk-3.0/bookmarks (trailing
@@ -3622,6 +3654,98 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         except OSError:
             pass
         return uris
+
+    def _get_bookmark_icons(self) -> dict:
+        """uri (trailing slash stripped) -> custom symbolic icon name. Only
+        bookmarks the user has explicitly customized are present."""
+        if not self._gsettings:
+            return {}
+        return self._gsettings.get_value("custom-bookmark-icons").unpack()
+
+    def _set_bookmark_icon(self, uri: str, icon_name: str) -> None:
+        if not self._gsettings:
+            return
+        icons = self._get_bookmark_icons()
+        icons[uri.rstrip("/")] = icon_name
+        self._gsettings.set_value("custom-bookmark-icons", GLib.Variant("a{ss}", icons))
+
+    def _clear_bookmark_icon(self, uri: str) -> None:
+        if not self._gsettings:
+            return
+        icons = self._get_bookmark_icons()
+        if icons.pop(uri.rstrip("/"), None) is not None:
+            self._gsettings.set_value("custom-bookmark-icons", GLib.Variant("a{ss}", icons))
+
+    def _apply_icon_to_row(self, row, icon_name: str) -> None:
+        """Apply `icon_name` to a bookmark row, both the displayed widget and
+        the row's "start-icon" property.
+
+        Nautilus' sidebar drag ghost is a fresh NautilusSidebarRow built from
+        properties (nautilus-sidebar-row.c: nautilus_sidebar_row_clone uses
+        self->start_icon, not the live widget), so the property must carry the
+        custom icon too, or dragging shows the original icon under the cursor.
+        We stash the pre-existing native GIcon once so _reset_icon_on_row can
+        restore it exactly. _pin_icon then keeps the inner Gtk.Image locked
+        against Nautilus' one-way bookmark.symbolic-icon -> row.start-icon
+        binding (nautilus-sidebar.c: g_object_bind_property in update_places)."""
+        img = _find_row_start_image(row)
+        if img is None:
+            _log("_apply_icon_to_row: no start image found on row")
+            return
+        theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+        if not theme.has_icon(icon_name):
+            # Store the intent regardless (already done by the caller); render
+            # best-effort by leaving the native icon in place.
+            _log(f"_apply_icon_to_row: {icon_name} missing in current theme, skipping pin")
+            return
+        if not hasattr(row, "_mc_native_start_icon"):
+            row._mc_native_start_icon = row.get_property("start-icon")
+        row.set_property("start-icon", Gio.ThemedIcon.new(icon_name))
+        _pin_icon(img, icon_name)
+        _log(f"_apply_icon_to_row: pinned {icon_name}")
+
+    def _reset_icon_on_row(self, row) -> None:
+        """Stop pinning and restore the native icon on both the widget and the
+        "start-icon" property, using the GIcon stashed by _apply_icon_to_row
+        before it was first overridden."""
+        img = _find_row_start_image(row)
+        if img is not None:
+            img._diskinfo_pin_name = None  # disarm _pin_icon's notify handler first
+        native_gicon = getattr(row, "_mc_native_start_icon", None)
+        if native_gicon is None:
+            native_gicon = row.get_property("start-icon")
+        row.set_property("start-icon", native_gicon)
+        if hasattr(row, "_mc_native_start_icon"):
+            del row._mc_native_start_icon
+
+    def _apply_bookmark_icons(self, native_listbox: Gtk.ListBox) -> None:
+        """Re-pin every customized bookmark's icon. Called on initial sidebar
+        injection and on every native list rebuild (_watch_native_list_changes),
+        since rebuilt rows get fresh widgets that need re-pinning."""
+        icons = self._get_bookmark_icons()
+        if not icons:
+            return
+        idx = 0
+        while (row := native_listbox.get_row_at_index(idx)) is not None:
+            idx += 1
+            try:
+                uri = row.get_property("uri")
+            except Exception:
+                uri = None
+            if not uri:
+                continue
+            icon_name = icons.get(uri.rstrip("/"))
+            if icon_name:
+                self._apply_icon_to_row(row, icon_name)
+
+    def _reapply_bookmark_icons_all_windows(self) -> bool:
+        """Re-apply custom bookmark icons in every window after a settings
+        change (e.g. another window customized a bookmark)."""
+        for _win, state in list(self._windows.items()):
+            native_listbox = state.get("sidebar_listbox")
+            if native_listbox is not None:
+                self._apply_bookmark_icons(native_listbox)
+        return GLib.SOURCE_REMOVE
 
     def _attach_bookmark_context_menus(self, win: Gtk.Window, native_listbox: Gtk.ListBox) -> None:
         """Attach a button-3 menu to each native bookmark row. Idempotent: a
@@ -3693,44 +3817,57 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         ag = Gio.SimpleActionGroup()
         act = Gio.SimpleAction.new("change-icon", None)
-        act.connect("activate", lambda *_a: self._test_change_bookmark_icon(win, uri, label, row))
+        act.connect("activate", lambda *_a: self._open_bookmark_icon_picker(uri, label, row))
         ag.add_action(act)
         popover.insert_action_group("mcbookmark", ag)
         popover._mc_injected = True
         _log(f"_inject_change_icon_item: added Change Icon to native menu uri={uri}")
         return GLib.SOURCE_REMOVE
 
-    def _test_change_bookmark_icon(self, win: Gtk.Window, uri: str, label: str, row) -> None:
-        """Placeholder action: confirms the entry fires, reports the bookmark, and
-        offers a button to apply a random Adwaita places symbolic icon to the row's
-        start-icon, to demonstrate that bookmark rows accept icon changes at all.
+    def _open_bookmark_icon_picker(self, uri: str, label: str, row) -> None:
+        """Searchable symbolic-icon grid for a bookmark. Matches native Rename's
+        presentation (nautilus-sidebar.c: create_rename_popover /
+        show_rename_popover): a Gtk.Popover parented to the row, arrow pointing
+        at it, GTK_POS_RIGHT - not a centered modal dialog. A plain Gtk.Popover
+        (not GtkPopoverMenu) so icons can be clicked repeatedly without the
+        popover auto-closing."""
+        _log(f"_open_bookmark_icon_picker: uri={uri} label={label}")
+        current_icon = self._get_bookmark_icons().get(uri.rstrip("/"))
 
-        Matches native Rename's presentation (nautilus-sidebar.c:
-        create_rename_popover / show_rename_popover): a Gtk.Popover parented to
-        the row, arrow pointing at it, GTK_POS_RIGHT - not a centered modal
-        dialog. A plain Gtk.Popover (not GtkPopoverMenu) so the button can be
-        clicked repeatedly without the popover auto-closing."""
-        _log(f"_test_change_bookmark_icon: uri={uri} label={label}")
+        # Only the visible-row count needs a pixel height; the width is dynamic.
+        # A ScrolledWindow with horizontal policy NEVER requests its child's full
+        # natural width, so the grid's actual rendered width (cell + padding +
+        # borders + its own start/end margins) drives the popover - no brittle
+        # width arithmetic. The header/button stretch to match via hexpand.
+        grid_height = (
+            _ICON_PICKER_ROWS * _ICON_PICKER_CELL_SIZE
+            + (_ICON_PICKER_ROWS - 1) * _ICON_PICKER_SPACING
+        )
+
         popover = Gtk.Popover()
         popover.set_parent(row)
         popover.set_position(Gtk.PositionType.RIGHT)
 
+        # No horizontal margin on the outer box: each child manages its own side
+        # margins so the grid can reach further right than the header/button.
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         box.set_margin_top(10)
         box.set_margin_bottom(10)
-        box.set_margin_start(10)
-        box.set_margin_end(10)
 
-        title = Gtk.Label(label=_("Change Icon (test)"))
-        title.add_css_class("heading")
+        # Header: label + search bar grouped, 10px side margins, hexpand so it
+        # stretches to the grid's dynamic width (the grid drives the box width).
+        header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        header.set_hexpand(True)
+        header.set_margin_start(10)
+        header.set_margin_end(10)
+        box.append(header)
+
+        # Bold markup label, matching native Rename's "<b>Name</b>" field label
+        # style (nautilus-sidebar.c: create_rename_popover), not a .heading.
+        title = Gtk.Label(label="<b>%s</b>" % _("Icon"))
+        title.set_use_markup(True)
         title.set_xalign(0.0)
-        box.append(title)
-
-        info = Gtk.Label(label=_("Bookmark: %(label)s") % {"label": label})
-        info.add_css_class("caption")
-        info.add_css_class("dim-label")
-        info.set_xalign(0.0)
-        box.append(info)
+        header.append(title)
 
         search_entry = Gtk.SearchEntry()
         search_entry.set_placeholder_text(_("Search icons…"))
@@ -3739,34 +3876,64 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         # its own search and never lets it bubble up. Forward it explicitly so
         # Escape closes this popover too, matching native behaviour.
         search_entry.connect("stop-search", lambda _e: popover.popdown())
-        box.append(search_entry)
+        header.append(search_entry)
 
         flow = Gtk.FlowBox()
-        flow.set_selection_mode(Gtk.SelectionMode.NONE)
-        flow.set_max_children_per_line(6)
-        flow.set_min_children_per_line(6)
+        # SINGLE selection mode gives each cell the same native hover/selected
+        # background as the disk cards (.diskinfo-panel flowbox), instead of a
+        # nested Gtk.Button - a button's own hover background stacked on top of
+        # the FlowBoxChild's was the "double grey" look. The "mc-icon-grid"
+        # class scopes the same --accent-bg-color grey override used there.
+        flow.add_css_class("mc-icon-grid")
+        flow.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        flow.set_activate_on_single_click(True)
+        flow.set_max_children_per_line(_ICON_PICKER_COLS)
+        flow.set_min_children_per_line(_ICON_PICKER_COLS)
         flow.set_homogeneous(True)
-        flow.set_row_spacing(4)
-        flow.set_column_spacing(4)
+        flow.set_row_spacing(_ICON_PICKER_SPACING)
+        flow.set_column_spacing(_ICON_PICKER_SPACING)
         # Anchor to the start corner (top-left, or top-right under RTL) instead
         # of the FlowBox's default fill/center, so a filtered-down result sits
         # at the corner rather than floating in the middle of the popover.
         flow.set_valign(Gtk.Align.START)
-        is_rtl = flow.get_direction() == Gtk.TextDirection.RTL
-        flow.set_halign(Gtk.Align.END if is_rtl else Gtk.Align.START)
+        flow.set_halign(Gtk.Align.START)
+        flow.set_margin_start(10)
+        flow.set_margin_end(10)
+        reset_button = Gtk.Button(label=_("Reset"))
+        reset_button.set_sensitive(current_icon is not None)
+
+        def _on_icon_activated(_flow, child: Gtk.FlowBoxChild) -> None:
+            icon_name = child._mc_icon_name
+            self._set_bookmark_icon(uri, icon_name)
+            self._apply_icon_to_row(row, icon_name)
+            reset_button.set_sensitive(True)
+            _log(f"_open_bookmark_icon_picker: set {icon_name} for uri={uri}")
+
+        def _on_reset_clicked(_button) -> None:
+            self._clear_bookmark_icon(uri)
+            self._reset_icon_on_row(row)
+            flow.unselect_all()
+            reset_button.set_sensitive(False)
+            _log(f"_open_bookmark_icon_picker: cleared custom icon for uri={uri}")
+
+        flow.connect("child-activated", _on_icon_activated)
+
         theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
         all_symbolic = sorted(n for n in theme.get_icon_names() if n.endswith("-symbolic"))
+        current_child = None
         for icon_name in all_symbolic:
-            icon_button = Gtk.Button()
-            icon_button.add_css_class("flat")
-            icon_button.set_tooltip_text(icon_name)
-            icon_button.set_size_request(36, 36)
-            icon_button.set_child(Gtk.Image.new_from_icon_name(icon_name))
-            icon_button.connect("clicked", self._on_test_icon_picked, row, icon_name)
+            img = Gtk.Image.new_from_icon_name(icon_name)
+            img.set_tooltip_text(icon_name)
             child = Gtk.FlowBoxChild()
-            child.set_child(icon_button)
+            child.set_child(img)
+            child.set_size_request(_ICON_PICKER_CELL_SIZE, _ICON_PICKER_CELL_SIZE)
             child._mc_icon_name = icon_name
             flow.append(child)
+            if icon_name == current_icon:
+                current_child = child
+
+        if current_child is not None:
+            flow.select_child(current_child)
 
         def _filter_icons(child) -> bool:
             query = search_entry.get_text().strip().lower()
@@ -3775,24 +3942,25 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         flow.set_filter_func(_filter_icons)
         search_entry.connect("search-changed", lambda _e: flow.invalidate_filter())
 
-        # Locked to 6 columns; viewport sized to show ~6 rows, rest reachable
-        # via the vertical scrollbar since the full theme is 1000+ icons.
+        # Horizontal policy NEVER: the scrolled window requests the grid's full
+        # natural width (icons + the FlowBox's own start/end margins above), so
+        # the popover sizes itself to the grid - no width math. Height is fixed
+        # here on the wrapper - setting it on the GtkScrollable flow itself did
+        # not constrain the viewport, so the ScrolledWindow owns it instead.
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scrolled.set_size_request(260, 260)
+        scrolled.set_size_request(-1, grid_height)
         scrolled.set_child(flow)
         box.append(scrolled)
+
+        reset_button.set_margin_start(10)
+        reset_button.set_margin_end(10)
+        reset_button.connect("clicked", _on_reset_clicked)
+        box.append(reset_button)
 
         popover.set_child(box)
         popover.connect("closed", lambda p: p.unparent())
         popover.popup()
-
-    def _on_test_icon_picked(self, _button, row, icon_name: str) -> None:
-        try:
-            row.set_property("start-icon", Gio.ThemedIcon.new(icon_name))
-            _log(f"_on_test_icon_picked: applied {icon_name} to row")
-        except Exception as e:
-            _log(f"_on_test_icon_picked: failed to set start-icon ({e})")
 
     def _apply_native_place_visibility(self, native_listbox: Gtk.ListBox) -> None:
         """Instance shim so call sites can use self; delegates to the helper."""

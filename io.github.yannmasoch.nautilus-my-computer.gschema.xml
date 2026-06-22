@@ -98,5 +98,11 @@
       <description>Right color (stop 100%) used when color-mode is gradient</description>
     </key>
 
+    <key name="custom-bookmark-icons" type="a{ss}">
+      <default>{}</default>
+      <summary>Custom bookmark icons</summary>
+      <description>Map of bookmark URI to chosen symbolic icon name. Only customized bookmarks are stored.</description>
+    </key>
+
   </schema>
 </schemalist>

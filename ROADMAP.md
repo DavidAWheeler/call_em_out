@@ -11,7 +11,6 @@ Planned fixes, features, and improvements. Subject to change as the project evol
 - fix: compatibility with Zorin OS
 - fix: misaligned sidebar icon and text (#22)
 - fix: stray Computer icon next to the first tab's title (#29)
-- fix: respect Nautilus's "single-click to open" setting on disk cards (#28)
 
 ## On the horizon
 - feat: drag-and-drop and copy/paste support on disk cards

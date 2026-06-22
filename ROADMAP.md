@@ -5,10 +5,13 @@ Planned fixes, features, and improvements. Subject to change as the project evol
 ---
 
 ## Currently
-- fix: don't show Unmount on EFI/system partitions and unmount/format on /home (#34)
+- fix: opening a folder whose name contains "Computer" (e.g. "OK Computer/CD 1")
+  incorrectly shows the Computer view instead of the folder (#38)
 
 ## Next up
+- feat: custom symbolic icons for user bookmarks (#23)
 - fix: compatibility with Zorin OS
+- fix: Computer doesn't appear after install on Bazzite/Silverblue-style images (#41)
 - fix: misaligned sidebar icon and text (#22)
 - fix: stray Computer icon next to the first tab's title (#29)
 
@@ -19,8 +22,6 @@ Planned fixes, features, and improvements. Subject to change as the project evol
 - feat: pin custom folders and other locations (Trash, Starred, etc.) alongside Computer (#30)
 
 ## Considering
-- feat: custom symbolic icons for user bookmarks (#23)
-  extension; tracking in case scope ever broadens
 - feat: install via Nix derivation (#35)
 - KDE Dolphin port (#21)
 

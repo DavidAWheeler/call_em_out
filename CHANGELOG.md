@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.7.12
+
+### Fixed
+- The right-click menu no longer offers Unmount or Format on system and home
+  partitions, including the EFI partition (credit @mendres82, PR #34)
+- Drives mounted manually or via fstab no longer show an Unmount option that
+  didn't actually work
+
+---
+
 ## v0.7.11
 
 ### Internationalization

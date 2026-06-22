@@ -4,6 +4,24 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.7.8
+
+### Internationalization
+- German translation (credit @mendres82, PR #32; credit @crian, PR #25)
+- Korean translation (credit @Saintliy, PR #20)
+- Turkish translation (credit @TaylanTatli, PR #36)
+- Sidebar - Places strings (Home, Recent, Starred, Trash) added across Arabic, Catalan,
+  Spanish, French, Italian, Korean, Portuguese, and Turkish, bringing every language file
+  to full parity with the current string set
+- `"Network Volumes"` renamed to `"Network"` across all language files to match the
+  current sidebar/group naming
+
+### Fixed
+- German `msgid "Network"` previously fell back to the untranslated source string after
+  the rename; now reads "Netzwerk"
+
+---
+
 ## v0.7.7
 Installer fixes for package-manager detection, plus more detailed system info.
 

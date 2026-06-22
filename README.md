@@ -148,9 +148,12 @@ Both left-to-right (LTR) and right-to-left (RTL) layouts are supported. The pane
 | Arabic | `ar` | RTL |
 | Catalan | `ca` | LTR |
 | French | `fr` | LTR |
+| German | `de` | LTR |
 | Italian | `it` | LTR |
+| Korean | `ko` | LTR |
 | Portuguese | `pt` | LTR |
 | Spanish | `es` | LTR |
+| Turkish | `tr` | LTR |
 
 Want to add your language? Contributions are welcome, open a PR with a new `.po` file under `po/`.
 

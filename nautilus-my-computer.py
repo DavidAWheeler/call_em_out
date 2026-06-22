@@ -454,8 +454,9 @@ def _disk_context_menu(ext, win, m) -> ContextualMenu:
 
     # Section 1: mount / unmount / eject + format (non-system only).
     if not is_system and not (m.mountpoint == "/home" or m.mountpoint.startswith("/home/")):
-        if not is_mounted and m.can_mount:
-            items.append(MenuItem(_("Mount"), action=lambda: ext._do_mount(m, win), section=1))
+        if not is_mounted:
+            if m.can_mount:
+                items.append(MenuItem(_("Mount"), action=lambda: ext._do_mount(m, win), section=1))
         elif m.can_eject:
             items.append(MenuItem(_("Eject"), action=lambda: ext._do_eject(m), section=1))
         elif m.can_unmount:

@@ -30,7 +30,7 @@ msgstr "Disk"
 
 # Previous translation (before rename from "Network Volumes"): Ağ Birimleri
 msgid "Network"
-msgstr "Ağ"
+msgstr ""
 
 # ——————————————————————————————
 # Panel - Disk card
@@ -81,16 +81,16 @@ msgstr "Bilgisayarımı Aç"
 # Sidebar - Places
 # ——————————————————————————————
 msgid "Home"
-msgstr "Ev"
+msgstr ""
 
 msgid "Recent"
-msgstr "Son"
+msgstr ""
 
 msgid "Starred"
-msgstr "Yıldızlı"
+msgstr ""
 
 msgid "Trash"
-msgstr "Çöp"
+msgstr ""
 
 # ——————————————————————————————
 # Preferences - General
@@ -140,8 +140,9 @@ msgstr "Bitiş rengi"
 # ——————————————————————————————
 # Preferences - Panel visibility
 # ——————————————————————————————
+# Previous translation (before rename from "Visibility"): Görünürlük
 msgid "Panel visibility"
-msgstr "Panel görünürlüğü"
+msgstr ""
 
 msgid ""
 "Choose how each group appears. Visible: shows the group as a normal "
@@ -174,10 +175,10 @@ msgstr "Önyükleme ve EFI bölümlerini Sistem grubuna dahil et"
 # Preferences - Sidebar visibility
 # ——————————————————————————————
 msgid "Sidebar visibility"
-msgstr "Kenar çubuğu görünürlüğü"
+msgstr ""
 
 msgid "Choose which locations appear on the sidebar."
-msgstr "Kenar çubuğunda hangi konumların görüneceğini seçin."
+msgstr ""
 
 # ——————————————————————————————
 # Preferences - About

@@ -80,7 +80,7 @@ DETACH_SETTINGS_WINDOW = False  # testing toggle: True opens settings as a stand
 
 # ── Extension metadata (keep in sync with pyproject.toml) ────────────────────
 EXT_NAME = "My Computer for Nautilus"
-EXT_VERSION = "0.8.0"
+EXT_VERSION = "0.8.1"
 EXT_AUTHOR = "Yann Masoch"
 EXT_LICENSE = "MIT"
 EXT_GITHUB = "https://github.com/yannmasoch/nautilus-my-computer"
@@ -1678,6 +1678,34 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         elif key == "custom-bookmark-icons":
             # Another window customized a bookmark icon -- re-apply everywhere.
             GLib.idle_add(self._reapply_bookmark_icons_all_windows)
+        elif key == "computer-icon":
+            # Distro override or dconf edit -- re-pin the Computer row/chip icon.
+            GLib.idle_add(self._reapply_computer_icon_all_windows)
+
+    def _get_computer_icon(self) -> str:
+        """Symbolic icon name for the Computer row, overridable via the
+        computer-icon GSettings key (e.g. a distro .gschema.override)."""
+        if self._gsettings is None:
+            return COMPUTER_ICON
+        icon = self._gsettings.get_string("computer-icon")
+        return icon or COMPUTER_ICON
+
+    def _reapply_computer_icon_all_windows(self) -> bool:
+        """Re-pin the Computer sidebar row and path bar chip icon in every
+        window after a computer-icon settings change."""
+        icon_name = self._get_computer_icon()
+        for win, state in list(self._windows.items()):
+            sidebar_row = state.get("sidebar_row")
+            if sidebar_row is not None:
+                for w in _all_widgets(sidebar_row):
+                    if isinstance(w, Gtk.Image):
+                        _pin_icon(w, icon_name)
+                try:
+                    sidebar_row.set_property("start-icon", Gio.ThemedIcon.new(icon_name))
+                except Exception:
+                    pass
+            self._fix_pathbar_icon(win)
+        return GLib.SOURCE_REMOVE
 
     def _apply_bar_color(self) -> None:
         if not self._gsettings or self._bar_css_display is None:
@@ -3361,7 +3389,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         # other place stays native; we just toggle its native row's visibility.
         row_label = entry.label
         row_tooltip = entry.tooltip
-        icon_name = entry.icon
+        icon_name = self._get_computer_icon() if entry.uri == DISKS_URI else entry.icon
 
         # Try to instantiate NautilusSidebarRow directly from the Nautilus GObject
         # type system. It is registered at runtime when Nautilus loads, so
@@ -4069,7 +4097,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             # Pin the existing chip image — no structural changes to Nautilus's tree
             for sub in _all_widgets(container):
                 if isinstance(sub, Gtk.Image):
-                    _pin_icon(sub, COMPUTER_ICON)
+                    _pin_icon(sub, self._get_computer_icon())
                     break
 
         return False

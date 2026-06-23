@@ -4,6 +4,27 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.8.1
+Lets distros and power users set a different default icon for the Computer entry.
+
+### Added
+- The Computer icon (in the sidebar and the address bar) can now be changed
+  via GSettings, instead of always being the default `computer-symbolic`
+  icon. Changes apply instantly, no restart needed. This is mainly useful
+  for Linux distributions that want to ship their own icon by default.
+
+---
+
+## v0.8.0
+Custom icons for bookmarks, with native right-click integration.
+
+### Added
+- Right-click "Change icon" on any sidebar bookmark, with a symbolic icon
+  picker dialog; the chosen icon persists across Nautilus restarts and is
+  pinned against Nautilus's async icon overwrites (issue #23)
+
+---
+
 ## v0.7.13
 
 ### Fixed

@@ -4,6 +4,18 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.8.3
+Raises the Python floor to match what the extension actually requires, and refreshes a doc screenshot.
+
+### Changed
+- Minimum Python bumped from 3.9 to 3.12. The extension already required
+  libadwaita 1.5 (`Adw.PreferencesDialog`) and GNOME 46, so no distro that
+  can run it ships Python older than 3.11; the 3.9 floor was no longer
+  accurate
+- Updated the custom bookmark icons screenshot in `assets/images/`
+
+---
+
 ## v0.8.2
 Translation prep for the bookmark icon picker.
 

@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.8.2
+Translation prep for the bookmark icon picker.
+
+### Internationalization
+- Added translatable strings for the bookmark "Change Icon" menu item and
+  picker dialog (Icon, Search icons…, Reset); French translated, other
+  languages left for contributors to fill in
+
+---
+
 ## v0.8.1
 Lets distros and power users set a different default icon for the Computer entry.
 

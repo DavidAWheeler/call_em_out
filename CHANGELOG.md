@@ -4,6 +4,18 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.8.4
+Correct root disk detection on OSTree/bootc systems.
+
+### Fixed
+- On OSTree/bootc systems (e.g. stillOS), the disk view could show `/etc` or
+  `/var` instead of a proper root disk, since `/proc/mounts` exposes those as
+  separate implementation mounts. The root card now reports the real writable
+  backing filesystem, and `/etc`, `/var`, and `/sysroot` are hidden from the
+  disk list (credit @PizzaLovingNerd, stillOS, PR #44)
+
+---
+
 ## v0.8.3
 Raises the Python floor to match what the extension actually requires, and refreshes a doc screenshot.
 

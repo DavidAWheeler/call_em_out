@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import dataclasses
 import gettext
 import os
@@ -80,13 +82,14 @@ DETACH_SETTINGS_WINDOW = False  # testing toggle: True opens settings as a stand
 
 # ── Extension metadata (keep in sync with pyproject.toml) ────────────────────
 EXT_NAME = "My Computer for Nautilus"
-EXT_VERSION = "0.7.12"
+EXT_VERSION = "0.8.4"
 EXT_AUTHOR = "Yann Masoch"
 EXT_LICENSE = "MIT"
 EXT_GITHUB = "https://github.com/yannmasoch/nautilus-my-computer"
 
 
 DISKS_URI = "computer:///"
+_DISKS_FILE = Gio.File.new_for_uri(DISKS_URI)
 COMPUTER_LABEL = _("Computer")
 COMPUTER_ICON = "computer-symbolic"  # icon used in sidebar and path bar
 MENU_ITEM_LABEL = _("My Computer Settings")
@@ -133,6 +136,11 @@ _STALE_RELEASE_FRAMES = 2  # keep detached panel generations alive across this m
 _FLOW_COLS_GRID = 8  # max columns in grid (FlowBox) view
 _CARD_WIDTH = 240  # fixed grid-card width (px); labels ellipsize within it
 _LIST_BAR_MAX_WIDTH = 240  # max width (px) of the usage bar at the end of a list-view row
+
+_ICON_PICKER_COLS = 6  # bookmark icon-picker grid: visible columns
+_ICON_PICKER_ROWS = 5  # bookmark icon-picker grid: visible rows before scrolling
+_ICON_PICKER_CELL_SIZE = 36  # px, square cell (FlowBoxChild) holding one icon
+_ICON_PICKER_SPACING = 4  # px, row/column spacing between cells
 
 
 # Resolve the display name Nautilus shows in the title bar when at DISKS_URI,
@@ -559,6 +567,62 @@ def _read_os_name() -> str:
     return ""
 
 
+def _is_ostree_booted() -> bool:
+    """True on OSTree/image-based systems, including bootc distributions."""
+    return os.path.exists("/run/ostree-booted")
+
+
+def _is_ostree_implementation_mount(mountpoint: str) -> bool:
+    """True for implementation mounts that should not be shown as drives."""
+    if not _is_ostree_booted():
+        return False
+    return mountpoint in ("/etc", "/var", "/sysroot") or mountpoint.startswith("/sysroot/")
+
+
+def _statvfs_usage(path: str) -> tuple[int, int] | None:
+    """Return total/free bytes for a path, or None when unavailable."""
+    try:
+        st = os.statvfs(path)
+    except OSError:
+        return None
+    return st.f_blocks * st.f_frsize, st.f_bavail * st.f_frsize
+
+
+def _root_usage() -> tuple[int, int] | None:
+    """Return user-meaningful root capacity.
+
+    On OSTree/bootc systems, / may be the small immutable image view. Prefer
+    the writable/backing deployment filesystem for the displayed root card
+    while still navigating to /.
+    """
+    if _is_ostree_booted():
+        candidates = [_statvfs_usage(path) for path in ("/var", "/sysroot") if os.path.exists(path)]
+        candidates = [usage for usage in candidates if usage is not None]
+        if candidates:
+            return max(candidates, key=lambda usage: usage[0])
+    return _statvfs_usage("/")
+
+
+def _root_mount_info() -> MountInfo | None:
+    """Build a canonical root entry when /proc/mounts does not expose one cleanly."""
+    usage = _root_usage()
+    if usage is None:
+        return None
+    total, free = usage
+    return MountInfo(
+        key="path:/",
+        uuid=None,
+        device="/",
+        mountpoint="/",
+        fstype="rootfs",
+        opts=set(),
+        total=total,
+        free=free,
+        display_name=_read_os_name() or "/",
+        nav_uri=Gio.File.new_for_path("/").get_uri(),
+    )
+
+
 def _build_uuid_map() -> dict[str, str]:
     """Return {real_device_path: uuid_string} from /dev/disk/by-uuid."""
     result: dict[str, str] = {}
@@ -706,6 +770,9 @@ _CSS = b"""
 .diskinfo-panel {
 }
 .diskinfo-panel flowbox {
+    --accent-bg-color: var(--diskinfo-selection-grey);
+}
+.mc-icon-grid {
     --accent-bg-color: var(--diskinfo-selection-grey);
 }
 .diskinfo-subtext {
@@ -856,6 +923,7 @@ def _scan_mounts(show_system_partitions: bool = False) -> list[MountInfo]:
     mounts: list[MountInfo] = []
     seen: set[str] = set()
     uuid_map = _build_uuid_map()
+    has_root = False
 
     # Build mountpoint → Gio.Icon / Gio.Mount from VolumeMonitor so we can
     # attach the real hardware icon and GIO handle to each /proc/mounts entry.
@@ -890,19 +958,25 @@ def _scan_mounts(show_system_partitions: bool = False) -> list[MountInfo]:
                 mountpoint = _unescape_mount_field(parts[1])
                 fstype, options = parts[2], parts[3]
                 opts = set(options.split(","))
+                if _is_ostree_implementation_mount(mountpoint):
+                    continue
                 gvfs_show = "x-gvfs-show" in opts
                 is_external = any(mountpoint.startswith(p) for p in EXTERNAL_PREFIXES)
                 if (
-                    fstype not in REAL_FSTYPES and not gvfs_show and not is_external
+                    fstype not in REAL_FSTYPES
+                    and not gvfs_show
+                    and not is_external
+                    and mountpoint != "/"
                 ) or device in seen:
                     continue
                 if not show_system_partitions and mountpoint in ("/boot", "/boot/efi", "/efi"):
                     continue
                 seen.add(device)
                 try:
-                    st = os.statvfs(mountpoint)
-                    total = st.f_blocks * st.f_frsize
-                    free = st.f_bavail * st.f_frsize
+                    usage = _root_usage() if mountpoint == "/" else _statvfs_usage(mountpoint)
+                    if usage is None:
+                        continue
+                    total, free = usage
                     real_dev = os.path.realpath(device)
                     uuid = uuid_map.get(real_dev)
                     gio_mount = mount_by_path.get(mountpoint) or (
@@ -917,6 +991,8 @@ def _scan_mounts(show_system_partitions: bool = False) -> list[MountInfo]:
                     gio_volume = gio_mount.get_volume() if gio_mount else None
                     gio_drive = gio_volume.get_drive() if gio_volume else None
                     key = f"uuid:{uuid}" if uuid else device
+                    if mountpoint == "/":
+                        has_root = True
                     mounts.append(
                         MountInfo(
                             key=key,
@@ -945,6 +1021,10 @@ def _scan_mounts(show_system_partitions: bool = False) -> list[MountInfo]:
                     pass
     except OSError:
         pass
+    if not has_root:
+        root = _root_mount_info()
+        if root is not None:
+            mounts.insert(0, root)
     return mounts
 
 
@@ -1139,6 +1219,48 @@ def _all_widgets(widget):
         child = child.get_next_sibling()
 
 
+def _window_is_at_disks(win) -> bool:
+    """True if the window's active slot is currently showing DISKS_URI.
+
+    Reads the NautilusWindowSlot "location" GFile property on demand. No
+    persistent signal, no set_child (safe re: issue #11). Prefers the active
+    slot so tabs are handled; falls back to the first slot with a location.
+    """
+    fallback = None
+    for w in _all_widgets(win):
+        if "Slot" not in type(w).__name__:
+            continue
+        try:
+            loc = w.get_property("location")
+        except TypeError:
+            continue
+        if loc is None:
+            continue
+        try:
+            if w.get_property("active"):
+                return loc.equal(_DISKS_FILE)
+        except TypeError:
+            pass
+        fallback = loc
+    return fallback is not None and fallback.equal(_DISKS_FILE)
+
+
+def _menu_section_with_action(model, action_name):
+    """Return the section GMenu of `model` that contains an item bound to
+    `action_name`, or None. Used to append into a native menu's existing group
+    (e.g. the Remove/Rename section) rather than tacking on a new section."""
+    str_type = GLib.VariantType.new("s")
+    for i in range(model.get_n_items()):
+        section = model.get_item_link(i, Gio.MENU_LINK_SECTION)
+        if section is None:
+            continue
+        for j in range(section.get_n_items()):
+            av = section.get_item_attribute_value(j, "action", str_type)
+            if av is not None and av.get_string() == action_name:
+                return section
+    return None
+
+
 def _find_widget(root, *, buildable_id=None, class_name=None, css_class=None, site=""):
     """Find a widget by layered fallback: buildable_id → class_name → css_class.
 
@@ -1249,6 +1371,25 @@ def _repin_icon(img: Gtk.Image, icon_name: str) -> None:
     img.set_from_icon_name(icon_name)
     img.set_visible(True)
     img._diskinfo_restoring = False
+
+
+def _find_row_start_image(row: Gtk.Widget) -> Gtk.Image | None:
+    """Find a NautilusSidebarRow's start-icon Gtk.Image, skipping the eject
+    button's image (same in_button walk as _build_place_sidebar_row's
+    _pin_row_icon)."""
+    for w in _all_widgets(row):
+        if not isinstance(w, Gtk.Image):
+            continue
+        parent = w.get_parent()
+        in_button = False
+        while parent and parent is not row:
+            if isinstance(parent, Gtk.Button):
+                in_button = True
+                break
+            parent = parent.get_parent()
+        if not in_button:
+            return w
+    return None
 
 
 class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
@@ -1605,6 +1746,37 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         elif key.startswith("sidebar-show-"):
             # Sidebar place toggle -- re-apply native row visibility in every window.
             GLib.idle_add(self._reapply_sidebar_visibility)
+        elif key == "custom-bookmark-icons":
+            # Another window customized a bookmark icon -- re-apply everywhere.
+            GLib.idle_add(self._reapply_bookmark_icons_all_windows)
+        elif key == "computer-icon":
+            # Distro override or dconf edit -- re-pin the Computer row/chip icon.
+            GLib.idle_add(self._reapply_computer_icon_all_windows)
+
+    def _get_computer_icon(self) -> str:
+        """Symbolic icon name for the Computer row, overridable via the
+        computer-icon GSettings key (e.g. a distro .gschema.override)."""
+        if self._gsettings is None:
+            return COMPUTER_ICON
+        icon = self._gsettings.get_string("computer-icon")
+        return icon or COMPUTER_ICON
+
+    def _reapply_computer_icon_all_windows(self) -> bool:
+        """Re-pin the Computer sidebar row and path bar chip icon in every
+        window after a computer-icon settings change."""
+        icon_name = self._get_computer_icon()
+        for win, state in list(self._windows.items()):
+            sidebar_row = state.get("sidebar_row")
+            if sidebar_row is not None:
+                for w in _all_widgets(sidebar_row):
+                    if isinstance(w, Gtk.Image):
+                        _pin_icon(w, icon_name)
+                try:
+                    sidebar_row.set_property("start-icon", Gio.ThemedIcon.new(icon_name))
+                except Exception:
+                    pass
+            self._fix_pathbar_icon(win)
+        return GLib.SOURCE_REMOVE
 
     def _apply_bar_color(self) -> None:
         if not self._gsettings or self._bar_css_display is None:
@@ -1810,14 +1982,12 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         for key, m in list(_disk_data.items()):
             if m.is_gio or not m.is_mounted or not m.mountpoint:
                 continue
-            try:
-                st = os.statvfs(m.mountpoint)
-                total = st.f_blocks * st.f_frsize
-                free = st.f_bavail * st.f_frsize
-                if free != m.free or total != m.total:
-                    updates[key] = (total, free)
-            except OSError:
-                pass
+            usage = _root_usage() if m.mountpoint == "/" else _statvfs_usage(m.mountpoint)
+            if usage is None:
+                continue
+            total, free = usage
+            if free != m.free or total != m.total:
+                updates[key] = (total, free)
         if updates:
             GLib.idle_add(self._apply_usage_updates, updates, priority=GLib.PRIORITY_DEFAULT)
 
@@ -2518,7 +2688,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             return
 
         current_title = win.get_title() or ""
-        in_view = _LOCATION_TITLE in current_title
+        in_view = _window_is_at_disks(win)
 
         # A transient/empty title ("Loading…") means the window hasn't resolved
         # its location yet. Never act on it: it must not consume the one-shot
@@ -3188,7 +3358,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             st = self._windows.get(win)
             if st is None:
                 return GLib.SOURCE_REMOVE
-            if _LOCATION_TITLE in (win.get_title() or ""):
+            if _window_is_at_disks(win):
                 st["awaiting_disks"] = False  # arrived
                 return GLib.SOURCE_REMOVE
             attempts[0] += 1
@@ -3288,7 +3458,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         # other place stays native; we just toggle its native row's visibility.
         row_label = entry.label
         row_tooltip = entry.tooltip
-        icon_name = entry.icon
+        icon_name = self._get_computer_icon() if entry.uri == DISKS_URI else entry.icon
 
         # Try to instantiate NautilusSidebarRow directly from the Nautilus GObject
         # type system. It is registered at runtime when Nautilus loads, so
@@ -3467,6 +3637,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         # Hide native place rows the user toggled off, and re-apply on rebuilds.
         self._apply_native_place_visibility(native_listbox)
+        self._attach_bookmark_context_menus(win, native_listbox)
+        self._apply_bookmark_icons(native_listbox)
         self._watch_native_list_changes(win, native_listbox)
 
         self._wire_computer_drop_dimming(wrapper, computer_row)
@@ -3541,6 +3713,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         def _rescan() -> bool:
             state["native_hide_pending"] = False
             self._apply_native_place_visibility(native_listbox)
+            self._attach_bookmark_context_menus(win, native_listbox)
+            self._apply_bookmark_icons(native_listbox)
             return GLib.SOURCE_REMOVE
 
         def _on_items_changed(*_a) -> None:
@@ -3553,6 +3727,337 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         # Keep refs alive for the window's lifetime so the model is not collected.
         state["native_hide_model"] = model
         state["native_hide_handler"] = handler_id
+
+    # ── Per-bookmark custom icons (issue #23) ──────────────────────────────────
+    # Adds a "Change Icon" item to the NATIVE bookmark context menu instead of
+    # replacing it. Nautilus rebuilds the row popover fresh on each right-click
+    # (nautilus-sidebar.c: show_row_popover -> create_row_popover, a
+    # GtkPopoverMenu parented to the NautilusSidebar). We fire a capture-phase
+    # gesture (before native), then on idle - once the native popover exists -
+    # append our item to its live GMenu model.
+
+    def _gtk_bookmark_uris(self) -> set:
+        """The user's bookmark URIs from ~/.config/gtk-3.0/bookmarks (trailing
+        slash stripped), used to tell real bookmarks apart from mounted volumes
+        and built-in places (which also carry file:// URIs)."""
+        path = os.path.join(GLib.get_user_config_dir(), "gtk-3.0", "bookmarks")
+        uris = set()
+        try:
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        uris.add(line.split(maxsplit=1)[0].rstrip("/"))
+        except OSError:
+            pass
+        return uris
+
+    def _get_bookmark_icons(self) -> dict:
+        """uri (trailing slash stripped) -> custom symbolic icon name. Only
+        bookmarks the user has explicitly customized are present."""
+        if not self._gsettings:
+            return {}
+        return self._gsettings.get_value("custom-bookmark-icons").unpack()
+
+    def _set_bookmark_icon(self, uri: str, icon_name: str) -> None:
+        if not self._gsettings:
+            return
+        icons = self._get_bookmark_icons()
+        icons[uri.rstrip("/")] = icon_name
+        self._gsettings.set_value("custom-bookmark-icons", GLib.Variant("a{ss}", icons))
+
+    def _clear_bookmark_icon(self, uri: str) -> None:
+        if not self._gsettings:
+            return
+        icons = self._get_bookmark_icons()
+        if icons.pop(uri.rstrip("/"), None) is not None:
+            self._gsettings.set_value("custom-bookmark-icons", GLib.Variant("a{ss}", icons))
+
+    def _apply_icon_to_row(self, row, icon_name: str) -> None:
+        """Apply `icon_name` to a bookmark row, both the displayed widget and
+        the row's "start-icon" property.
+
+        Nautilus' sidebar drag ghost is a fresh NautilusSidebarRow built from
+        properties (nautilus-sidebar-row.c: nautilus_sidebar_row_clone uses
+        self->start_icon, not the live widget), so the property must carry the
+        custom icon too, or dragging shows the original icon under the cursor.
+        We stash the pre-existing native GIcon once so _reset_icon_on_row can
+        restore it exactly. _pin_icon then keeps the inner Gtk.Image locked
+        against Nautilus' one-way bookmark.symbolic-icon -> row.start-icon
+        binding (nautilus-sidebar.c: g_object_bind_property in update_places)."""
+        img = _find_row_start_image(row)
+        if img is None:
+            _log("_apply_icon_to_row: no start image found on row")
+            return
+        theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+        if not theme.has_icon(icon_name):
+            # Store the intent regardless (already done by the caller); render
+            # best-effort by leaving the native icon in place.
+            _log(f"_apply_icon_to_row: {icon_name} missing in current theme, skipping pin")
+            return
+        if not hasattr(row, "_mc_native_start_icon"):
+            row._mc_native_start_icon = row.get_property("start-icon")
+        row.set_property("start-icon", Gio.ThemedIcon.new(icon_name))
+        _pin_icon(img, icon_name)
+        _log(f"_apply_icon_to_row: pinned {icon_name}")
+
+    def _reset_icon_on_row(self, row) -> None:
+        """Stop pinning and restore the native icon on both the widget and the
+        "start-icon" property, using the GIcon stashed by _apply_icon_to_row
+        before it was first overridden."""
+        img = _find_row_start_image(row)
+        if img is not None:
+            img._diskinfo_pin_name = None  # disarm _pin_icon's notify handler first
+        native_gicon = getattr(row, "_mc_native_start_icon", None)
+        if native_gicon is None:
+            native_gicon = row.get_property("start-icon")
+        row.set_property("start-icon", native_gicon)
+        if hasattr(row, "_mc_native_start_icon"):
+            del row._mc_native_start_icon
+
+    def _apply_bookmark_icons(self, native_listbox: Gtk.ListBox) -> None:
+        """Re-pin every customized bookmark's icon. Called on initial sidebar
+        injection and on every native list rebuild (_watch_native_list_changes),
+        since rebuilt rows get fresh widgets that need re-pinning."""
+        icons = self._get_bookmark_icons()
+        if not icons:
+            return
+        idx = 0
+        while (row := native_listbox.get_row_at_index(idx)) is not None:
+            idx += 1
+            try:
+                uri = row.get_property("uri")
+            except Exception:
+                uri = None
+            if not uri:
+                continue
+            icon_name = icons.get(uri.rstrip("/"))
+            if icon_name:
+                self._apply_icon_to_row(row, icon_name)
+
+    def _reapply_bookmark_icons_all_windows(self) -> bool:
+        """Re-apply custom bookmark icons in every window after a settings
+        change (e.g. another window customized a bookmark)."""
+        for _win, state in list(self._windows.items()):
+            native_listbox = state.get("sidebar_listbox")
+            if native_listbox is not None:
+                self._apply_bookmark_icons(native_listbox)
+        return GLib.SOURCE_REMOVE
+
+    def _attach_bookmark_context_menus(self, win: Gtk.Window, native_listbox: Gtk.ListBox) -> None:
+        """Attach a button-3 menu to each native bookmark row. Idempotent: a
+        per-row flag prevents double-attaching, and rows Nautilus rebuilds get a
+        fresh controller on the next pass (re-armed from _watch_native_list_changes)."""
+        bookmark_uris = self._gtk_bookmark_uris()
+        if not bookmark_uris:
+            return
+        idx = 0
+        while (row := native_listbox.get_row_at_index(idx)) is not None:
+            idx += 1
+            if getattr(row, "_mc_bookmark_menu", False):
+                continue
+            try:
+                uri = row.get_property("uri")
+            except Exception:
+                uri = None
+            if not uri or uri.rstrip("/") not in bookmark_uris:
+                continue
+            try:
+                label = row.get_property("label") or uri
+            except Exception:
+                label = uri
+            gesture = Gtk.GestureClick()
+            gesture.set_button(3)
+            # Nautilus builds the row popover on RELEASE (nautilus-sidebar.c:
+            # on_row_released -> show_row_popover), not press. Capture phase so we
+            # fire alongside native; idle then lands right after the popover exists.
+            gesture.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+            gesture.connect("released", self._on_bookmark_menu_augment, uri, label, win, row)
+            row.add_controller(gesture)
+            row._mc_bookmark_menu = True
+            _log(f"_attach_bookmark_context_menus: armed bookmark row uri={uri}")
+
+    def _on_bookmark_menu_augment(self, _gesture, _n, _x, _y, uri, label, win, row) -> None:
+        # Do NOT claim the event: Nautilus must still build its native menu. We
+        # only piggyback an extra item once that menu exists (next idle tick).
+        GLib.idle_add(self._inject_change_icon_item, win, uri, label, row)
+
+    def _inject_change_icon_item(self, win: Gtk.Window, uri: str, label: str, row) -> bool:
+        state = self._windows.get(win)
+        sidebar = state.get("sidebar_native_widget") if state else None
+        if sidebar is None:
+            return GLib.SOURCE_REMOVE
+        popover = None
+        for w in _all_widgets(sidebar):
+            if isinstance(w, Gtk.PopoverMenu) and w.get_mapped():
+                popover = w  # sidebar->popover, the row menu just built natively
+        if popover is None:
+            _log("_inject_change_icon_item: native popover not found")
+            return GLib.SOURCE_REMOVE
+        if getattr(popover, "_mc_injected", False):
+            return GLib.SOURCE_REMOVE
+        model = popover.get_menu_model()
+        if not isinstance(model, Gio.Menu):
+            _log(f"_inject_change_icon_item: model is {type(model).__name__}, not Gio.Menu")
+            return GLib.SOURCE_REMOVE
+
+        # Append to the native Remove/Rename section so the item sits in that group
+        # (after Rename), not in a separate block at the bottom. Find it by the
+        # row.rename action rather than a hard-coded index. Appending fires
+        # items-changed, so the already-mapped GtkPopoverMenu rebuilds and shows it.
+        section = _menu_section_with_action(model, "row.rename")
+        if not isinstance(section, Gio.Menu):
+            _log("_inject_change_icon_item: Remove/Rename section not found, using own section")
+            section = Gio.Menu()
+            model.append_section(None, section)
+        section.append(_("Change Icon"), "mcbookmark.change-icon")
+
+        ag = Gio.SimpleActionGroup()
+        act = Gio.SimpleAction.new("change-icon", None)
+        act.connect("activate", lambda *_a: self._open_bookmark_icon_picker(uri, label, row))
+        ag.add_action(act)
+        popover.insert_action_group("mcbookmark", ag)
+        popover._mc_injected = True
+        _log(f"_inject_change_icon_item: added Change Icon to native menu uri={uri}")
+        return GLib.SOURCE_REMOVE
+
+    def _open_bookmark_icon_picker(self, uri: str, label: str, row) -> None:
+        """Searchable symbolic-icon grid for a bookmark. Matches native Rename's
+        presentation (nautilus-sidebar.c: create_rename_popover /
+        show_rename_popover): a Gtk.Popover parented to the row, arrow pointing
+        at it, GTK_POS_RIGHT - not a centered modal dialog. A plain Gtk.Popover
+        (not GtkPopoverMenu) so icons can be clicked repeatedly without the
+        popover auto-closing."""
+        _log(f"_open_bookmark_icon_picker: uri={uri} label={label}")
+        current_icon = self._get_bookmark_icons().get(uri.rstrip("/"))
+
+        # Only the visible-row count needs a pixel height; the width is dynamic.
+        # A ScrolledWindow with horizontal policy NEVER requests its child's full
+        # natural width, so the grid's actual rendered width (cell + padding +
+        # borders + its own start/end margins) drives the popover - no brittle
+        # width arithmetic. The header/button stretch to match via hexpand.
+        grid_height = (
+            _ICON_PICKER_ROWS * _ICON_PICKER_CELL_SIZE
+            + (_ICON_PICKER_ROWS - 1) * _ICON_PICKER_SPACING
+        )
+
+        popover = Gtk.Popover()
+        popover.set_parent(row)
+        popover.set_position(Gtk.PositionType.RIGHT)
+
+        # No horizontal margin on the outer box: each child manages its own side
+        # margins so the grid can reach further right than the header/button.
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+
+        # Header: label + search bar grouped, 10px side margins, hexpand so it
+        # stretches to the grid's dynamic width (the grid drives the box width).
+        header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        header.set_hexpand(True)
+        header.set_margin_start(10)
+        header.set_margin_end(10)
+        box.append(header)
+
+        # Bold markup label, matching native Rename's "<b>Name</b>" field label
+        # style (nautilus-sidebar.c: create_rename_popover), not a .heading.
+        title = Gtk.Label(label="<b>%s</b>" % _("Icon"))
+        title.set_use_markup(True)
+        title.set_xalign(0.0)
+        header.append(title)
+
+        search_entry = Gtk.SearchEntry()
+        search_entry.set_placeholder_text(_("Search icons…"))
+        # Gtk.Popover closes on Escape natively (same as the native rename
+        # popover), but GtkSearchEntry intercepts Escape first to clear/stop
+        # its own search and never lets it bubble up. Forward it explicitly so
+        # Escape closes this popover too, matching native behaviour.
+        search_entry.connect("stop-search", lambda _e: popover.popdown())
+        header.append(search_entry)
+
+        flow = Gtk.FlowBox()
+        # SINGLE selection mode gives each cell the same native hover/selected
+        # background as the disk cards (.diskinfo-panel flowbox), instead of a
+        # nested Gtk.Button - a button's own hover background stacked on top of
+        # the FlowBoxChild's was the "double grey" look. The "mc-icon-grid"
+        # class scopes the same --accent-bg-color grey override used there.
+        flow.add_css_class("mc-icon-grid")
+        flow.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        flow.set_activate_on_single_click(True)
+        flow.set_max_children_per_line(_ICON_PICKER_COLS)
+        flow.set_min_children_per_line(_ICON_PICKER_COLS)
+        flow.set_homogeneous(True)
+        flow.set_row_spacing(_ICON_PICKER_SPACING)
+        flow.set_column_spacing(_ICON_PICKER_SPACING)
+        # Anchor to the start corner (top-left, or top-right under RTL) instead
+        # of the FlowBox's default fill/center, so a filtered-down result sits
+        # at the corner rather than floating in the middle of the popover.
+        flow.set_valign(Gtk.Align.START)
+        flow.set_halign(Gtk.Align.START)
+        flow.set_margin_start(10)
+        flow.set_margin_end(10)
+        reset_button = Gtk.Button(label=_("Reset"))
+        reset_button.set_sensitive(current_icon is not None)
+
+        def _on_icon_activated(_flow, child: Gtk.FlowBoxChild) -> None:
+            icon_name = child._mc_icon_name
+            self._set_bookmark_icon(uri, icon_name)
+            self._apply_icon_to_row(row, icon_name)
+            reset_button.set_sensitive(True)
+            _log(f"_open_bookmark_icon_picker: set {icon_name} for uri={uri}")
+
+        def _on_reset_clicked(_button) -> None:
+            self._clear_bookmark_icon(uri)
+            self._reset_icon_on_row(row)
+            flow.unselect_all()
+            reset_button.set_sensitive(False)
+            _log(f"_open_bookmark_icon_picker: cleared custom icon for uri={uri}")
+
+        flow.connect("child-activated", _on_icon_activated)
+
+        theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+        all_symbolic = sorted(n for n in theme.get_icon_names() if n.endswith("-symbolic"))
+        current_child = None
+        for icon_name in all_symbolic:
+            img = Gtk.Image.new_from_icon_name(icon_name)
+            img.set_tooltip_text(icon_name)
+            child = Gtk.FlowBoxChild()
+            child.set_child(img)
+            child.set_size_request(_ICON_PICKER_CELL_SIZE, _ICON_PICKER_CELL_SIZE)
+            child._mc_icon_name = icon_name
+            flow.append(child)
+            if icon_name == current_icon:
+                current_child = child
+
+        if current_child is not None:
+            flow.select_child(current_child)
+
+        def _filter_icons(child) -> bool:
+            query = search_entry.get_text().strip().lower()
+            return not query or query in child._mc_icon_name.lower()
+
+        flow.set_filter_func(_filter_icons)
+        search_entry.connect("search-changed", lambda _e: flow.invalidate_filter())
+
+        # Horizontal policy NEVER: the scrolled window requests the grid's full
+        # natural width (icons + the FlowBox's own start/end margins above), so
+        # the popover sizes itself to the grid - no width math. Height is fixed
+        # here on the wrapper - setting it on the GtkScrollable flow itself did
+        # not constrain the viewport, so the ScrolledWindow owns it instead.
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_size_request(-1, grid_height)
+        scrolled.set_child(flow)
+        box.append(scrolled)
+
+        reset_button.set_margin_start(10)
+        reset_button.set_margin_end(10)
+        reset_button.connect("clicked", _on_reset_clicked)
+        box.append(reset_button)
+
+        popover.set_child(box)
+        popover.connect("closed", lambda p: p.unparent())
+        popover.popup()
 
     def _apply_native_place_visibility(self, native_listbox: Gtk.ListBox) -> None:
         """Instance shim so call sites can use self; delegates to the helper."""
@@ -3661,7 +4166,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             # Pin the existing chip image — no structural changes to Nautilus's tree
             for sub in _all_widgets(container):
                 if isinstance(sub, Gtk.Image):
-                    _pin_icon(sub, COMPUTER_ICON)
+                    _pin_icon(sub, self._get_computer_icon())
                     break
 
         return False

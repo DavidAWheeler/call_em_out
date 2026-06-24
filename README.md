@@ -84,6 +84,12 @@ The default GNOME Files sidebar shows every built-in location whether you use it
 
 ![Sidebar Visibility](assets/images/sidebar-visibility.png)
 
+### Custom bookmark icons
+
+Right-click any bookmark in the sidebar and choose "Change icon" to pick a custom symbolic icon from a searchable picker. Your choice persists across Nautilus restarts.
+
+![Custom bookmark icons](assets/images/custom-bookmark-icons.png)
+
 ## Style
 
 ### Color mode for disk usage bars
@@ -122,6 +128,7 @@ My Computer is compatible with almost all custom GTK themes.
 - **Right-click context menu:** open, open in new tab, open in new window, mount, unmount, and eject volumes directly from a native-feel context menu.
 - **Groups visibility:** choose which storage groups are visible, hidden, or merged into one flat list.
 - **Sidebar visibility:** choose which sidebar locations are shown: Home, Recent, Starred, Network, and Trash.
+- **Custom bookmark icons:** right-click any bookmark to pick a custom symbolic icon from a searchable picker, persisted across restarts.
   
 ## Tested on
 

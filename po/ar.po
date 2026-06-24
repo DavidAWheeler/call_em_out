@@ -205,3 +205,19 @@ msgstr "شفرة المصدر"
 
 msgid "GitHub"
 msgstr "جيت هاب"
+
+#——————————————————————————————
+# Sidebar - Bookmark icon
+#——————————————————————————————
+
+msgid "Change Icon"
+msgstr ""
+
+msgid "Icon"
+msgstr ""
+
+msgid "Search icons…"
+msgstr ""
+
+msgid "Reset"
+msgstr ""

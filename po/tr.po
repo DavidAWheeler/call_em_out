@@ -202,3 +202,19 @@ msgstr "Kaynak kodu"
 
 msgid "GitHub"
 msgstr "GitHub"
+
+#——————————————————————————————
+# Sidebar - Bookmark icon
+#——————————————————————————————
+
+msgid "Change Icon"
+msgstr ""
+
+msgid "Icon"
+msgstr ""
+
+msgid "Search icons…"
+msgstr ""
+
+msgid "Reset"
+msgstr ""

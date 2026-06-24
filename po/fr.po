@@ -205,3 +205,19 @@ msgstr "Code source"
 
 msgid "GitHub"
 msgstr "GitHub"
+
+#——————————————————————————————
+# Sidebar - Bookmark icon
+#——————————————————————————————
+
+msgid "Change Icon"
+msgstr "Changer l’icône"
+
+msgid "Icon"
+msgstr "Icône"
+
+msgid "Search icons…"
+msgstr "Rechercher des icônes…"
+
+msgid "Reset"
+msgstr "Réinitialiser"

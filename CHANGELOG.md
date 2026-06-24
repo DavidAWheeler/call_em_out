@@ -4,6 +4,71 @@ All notable changes to this project are documented here.
 
 ---
 
+## v0.8.4
+Correct root disk detection on OSTree/bootc systems.
+
+### Fixed
+- On OSTree/bootc systems (e.g. stillOS), the disk view could show `/etc` or
+  `/var` instead of a proper root disk, since `/proc/mounts` exposes those as
+  separate implementation mounts. The root card now reports the real writable
+  backing filesystem, and `/etc`, `/var`, and `/sysroot` are hidden from the
+  disk list (credit @PizzaLovingNerd, stillOS, PR #44)
+
+---
+
+## v0.8.3
+Raises the Python floor to match what the extension actually requires, and refreshes a doc screenshot.
+
+### Changed
+- Minimum Python bumped from 3.9 to 3.12. The extension already required
+  libadwaita 1.5 (`Adw.PreferencesDialog`) and GNOME 46, so no distro that
+  can run it ships Python older than 3.11; the 3.9 floor was no longer
+  accurate
+- Updated the custom bookmark icons screenshot in `assets/images/`
+
+---
+
+## v0.8.2
+Translation prep for the bookmark icon picker.
+
+### Internationalization
+- Added translatable strings for the bookmark "Change Icon" menu item and
+  picker dialog (Icon, Search icons…, Reset); French translated, other
+  languages left for contributors to fill in
+
+---
+
+## v0.8.1
+Lets distros and power users set a different default icon for the Computer entry.
+
+### Added
+- The Computer icon (in the sidebar and the address bar) can now be changed
+  via GSettings, instead of always being the default `computer-symbolic`
+  icon. Changes apply instantly, no restart needed. This is mainly useful
+  for Linux distributions that want to ship their own icon by default.
+
+---
+
+## v0.8.0
+Custom icons for bookmarks, with native right-click integration.
+
+### Added
+- Right-click "Change icon" on any sidebar bookmark, with a symbolic icon
+  picker dialog; the chosen icon persists across Nautilus restarts and is
+  pinned against Nautilus's async icon overwrites (issue #23)
+
+---
+
+## v0.7.13
+
+### Fixed
+- Opening a folder whose name contains "Computer" (e.g. an album folder named
+  "OK Computer") no longer shows the My Computer view instead of the folder's
+  contents; detection now checks the actual `computer:///` location instead of
+  matching the window title text (credit @funinkina, issue #38)
+
+---
+
 ## v0.7.12
 
 ### Fixed

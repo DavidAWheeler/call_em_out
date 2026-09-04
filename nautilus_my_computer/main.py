@@ -2423,7 +2423,52 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         self._watch_native_list_changes(win, native_listbox)
 
         self._wire_computer_drop_dimming(wrapper, computer_row)
+        self._wire_bookmark_drop_target(wrapper, native_listbox)
         return True
+
+    def _wire_bookmark_drop_target(
+        self, wrapper: Gtk.Widget, native_listbox: Gtk.ListBox
+    ) -> None:
+        """Accept folders dropped into the empty area below the native
+        bookmark rows, matching Nautilus's Add to Bookmarks drop affordance.
+
+        Existing sidebar rows keep their native drop handling. The target is
+        only accepted when the pointer is in unused list space, so dragging
+        onto a real folder still performs Nautilus's normal operation."""
+        drop = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
+        drop.set_propagation_phase(Gtk.PropagationPhase.BUBBLE)
+
+        def _row_at_wrapper_y(y: float):
+            allocation = native_listbox.get_allocation()
+            local_y = int(y - allocation.y)
+            if local_y < 0 or local_y >= allocation.height:
+                return None
+            return native_listbox.get_row_at_y(local_y)
+
+        def _on_drop(_target, value, _x: float, y: float) -> bool:
+            # Never steal a drop targeted at an existing native place/bookmark.
+            if _row_at_wrapper_y(y) is not None:
+                return False
+            try:
+                files = value.get_files()
+            except (AttributeError, TypeError):
+                return False
+            added = False
+            for gfile in files:
+                uri = gfile.get_uri()
+                if not uri:
+                    continue
+                label = gfile.get_basename() or uri
+                before = bookmarks.is_bookmarked(uri)
+                bookmarks.add_bookmark(uri, label)
+                added = added or not before
+            if added:
+                _log("bookmark drop: added file list to GTK bookmarks")
+            return added
+
+        drop.connect("drop", _on_drop)
+        wrapper.add_controller(drop)
+        wrapper._mc_bookmark_drop_target = drop
 
     def _wire_computer_drop_dimming(self, area: Gtk.Widget, computer_row: Gtk.ListBoxRow) -> None:
         """Grey out (desensitize) the Computer row while a file drag is over the

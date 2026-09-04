@@ -1253,6 +1253,21 @@ class MyComputerColumnRow(Gtk.Box):
         self.append(chevron)
         self._chevron = chevron
 
+        # Column rows are real file sources, not just navigation targets.
+        # CAPTURE lets the drag source win over the row click gesture once the
+        # pointer crosses GTK's drag threshold.
+        drag = Gtk.DragSource()
+        drag.set_actions(Gdk.DragAction.COPY | Gdk.DragAction.MOVE | Gdk.DragAction.LINK)
+        drag.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        drag.connect("prepare", self._on_drag_prepare)
+        self.add_controller(drag)
+
+    def _on_drag_prepare(self, _source, _x: float, _y: float):
+        if self.item is None:
+            return None
+        file_list = Gdk.FileList.new_from_list([Gio.File.new_for_uri(self.item.uri)])
+        return Gdk.ContentProvider.new_for_value(file_list)
+
     @property
     def uri(self) -> str | None:
         return self.item.uri if self.item is not None else None

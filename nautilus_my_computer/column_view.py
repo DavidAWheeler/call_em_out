@@ -2639,23 +2639,8 @@ def build_column_view(ext, win: Gtk.Window, slot: Gtk.Widget) -> Gtk.Widget:
     root_uri = loc.get_uri() if loc is not None else default_root_uri()
     host = _ColumnViewHost(ext, win, win.get_display(), root_uri)
 
-    # Keep the early-access status attached to the view itself rather than
-    # Nautilus's toolbar: the toolbar remains native, while the badge stays
-    # visible whenever this experimental view is open.
     view = Gtk.Overlay()
     view.set_child(host.scroller)
-
-    beta_badge = Gtk.Label(label=_("Beta"))
-    beta_badge.add_css_class("mc-beta-badge")
-    beta_badge.set_halign(Gtk.Align.END)
-    beta_badge.set_valign(Gtk.Align.START)
-    beta_badge.set_margin_top(12)
-    beta_badge.set_margin_end(12)
-    # It is a status indicator, not a control: pointer input continues to
-    # reach the Column View content underneath it.
-    beta_badge.set_can_target(False)
-    beta_badge.set_tooltip_text(_("Early access feature. It may contain bugs or inconsistencies."))
-    view.add_overlay(beta_badge)
 
     # Public helpers retrieve the host from this widget, stored on the owning
     # slot as slot._mc_column_view (see _do_inject_into_slot below).

@@ -534,16 +534,6 @@ _CSS = b"""
 .mc-preview-column {
     padding: 12px;
 }
-/* Persistent early-access marker for Column View. The warm red follows the
-   destructive/action-warning family without borrowing the user's accent. */
-.mc-beta-badge {
-    background-color: #c01c28;
-    color: #ffffff;
-    border-radius: 4px;
-    font-size: 0.78em;
-    font-weight: 700;
-    padding: 3px 8px;
-}
 /* Preview thumbnail: rounded corners. The Gtk.Picture sets overflow:hidden so
    this radius clips the drawn image. 12px matches .card / .nautilus-view-cell. */
 .mc-preview-image {

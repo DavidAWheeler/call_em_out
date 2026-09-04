@@ -823,6 +823,16 @@ class _ColumnViewHost:
             return
 
         if button == Gdk.BUTTON_PRIMARY:
+            index = column._index_for_uri(row.uri)
+            modifiers = gesture.get_current_event_state()
+            ctrl = bool(modifiers & Gdk.ModifierType.CONTROL_MASK)
+            shift = bool(modifiers & Gdk.ModifierType.SHIFT_MASK)
+            if index is not None:
+                column.select_for_pointer(index, ctrl=ctrl, shift=shift)
+            # Modifier-click is selection-only, like Nautilus and other file
+            # managers. Keep the row gesture unclaimed so a drag can still
+            # win, but remember the intent for the matching release.
+            row._mc_pointer_selection_only = ctrl or shift
             # #161: primary is driven end to end by _on_row_pressed/
             # _on_row_released ourselves, same pattern as the Computer view
             # cards, rather than left to Gtk.ListBox's own competing gesture.
@@ -902,6 +912,14 @@ class _ColumnViewHost:
             gesture.set_state(Gtk.EventSequenceState.DENIED)
             return
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        modifiers = gesture.get_current_event_state()
+        if getattr(row, "_mc_pointer_selection_only", False) or modifiers & (
+            Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK
+        ):
+            row._mc_pointer_selection_only = False
+            column.grab_list_focus()
+            return
+        row._mc_pointer_selection_only = False
         # The list-item container is intentionally non-focusable to avoid a
         # premature GTK focus ring. Give the column focus explicitly here so
         # the next arrow key is handled by our Miller controller after a mouse
@@ -2227,7 +2245,6 @@ class _ColumnViewHost:
         if self._scroll_animation is not None:
             self._scroll_animation.skip()
             self._scroll_animation = None
-        self.scroller.get_hadjustment().set_value(0)
 
     def _sync_root_width(self) -> None:
         adj = self.scroller.get_hadjustment()

@@ -1265,7 +1265,10 @@ class MyComputerColumnRow(Gtk.Box):
     def _on_drag_prepare(self, _source, _x: float, _y: float):
         if self.item is None:
             return None
-        file_list = Gdk.FileList.new_from_list([Gio.File.new_for_uri(self.item.uri)])
+        uri = self.item.uri
+        file_list = Gdk.FileList.new_from_list([Gio.File.new_for_uri(uri)])
+        # Gdk.FileList leaves action negotiation to the destination, so
+        # Nautilus can honor its normal copy/move/link modifier behavior.
         return Gdk.ContentProvider.new_for_value(file_list)
 
     @property
@@ -1292,6 +1295,7 @@ class MyComputerColumnRow(Gtk.Box):
         can never land on the widget after it has been rebound to a
         different one (see unbind()).
         """
+        self._mc_pointer_selection_only = False
         self.item = item
         self._name_lbl.set_label(item.display_name)
         self._chevron.set_visible(item.is_dir)
@@ -1353,6 +1357,7 @@ class MyComputerColumnRow(Gtk.Box):
         if self._thumb_cancellable is not None:
             self._thumb_cancellable.cancel()
             self._thumb_cancellable = None
+        self._mc_pointer_selection_only = False
         self.item = None
 
     def do_snapshot(self, snapshot: Gtk.Snapshot) -> None:
@@ -2163,10 +2168,35 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         index = max(0, min(index, n - 1))
         if extend:
             return self.extend_selection_to(index)
+        self._selection.unselect_all()
         self._selection.select_item(index, True)
         self._cursor_index = index
         self._selection_anchor = index
         return self._store.get_item(index)
+
+    def toggle_index(self, index: int) -> "_ColumnRowItem | None":
+        """Toggle one pointer-selected row and make it the keyboard cursor."""
+        n = self._store.get_n_items()
+        if n == 0:
+            return None
+        index = max(0, min(index, n - 1))
+        if self._selection.is_selected(index):
+            self._selection.unselect_item(index)
+        else:
+            self._selection.select_item(index, True)
+        self._cursor_index = index
+        self._selection_anchor = index
+        return self._store.get_item(index)
+
+    def select_for_pointer(
+        self, index: int, *, ctrl: bool = False, shift: bool = False
+    ) -> "_ColumnRowItem | None":
+        """Apply standard plain/Ctrl/Shift pointer selection semantics."""
+        if ctrl:
+            return self.toggle_index(index)
+        if shift and self._selection_anchor is not None:
+            return self.extend_selection_to(index)
+        return self.select_index(index)
 
     def extend_selection_to(self, index: int) -> "_ColumnRowItem | None":
         """Extend the model selection from its anchor through ``index``."""

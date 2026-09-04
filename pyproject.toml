@@ -28,10 +28,10 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yannmasoch/nautilus-my-computer"
-Source = "https://github.com/yannmasoch/nautilus-my-computer"
-Changelog = "https://github.com/yannmasoch/nautilus-my-computer/releases"
-Issues = "https://github.com/yannmasoch/nautilus-my-computer/issues"
+Homepage = "https://github.com/DavidAWheeler/call_em_out"
+Source = "https://github.com/DavidAWheeler/call_em_out"
+Changelog = "https://github.com/DavidAWheeler/call_em_out/releases"
+Issues = "https://github.com/DavidAWheeler/call_em_out/issues"
 
 [tool.setuptools]
 py-modules = ["nautilus-my-computer"]

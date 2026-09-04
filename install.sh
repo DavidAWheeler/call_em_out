@@ -4,7 +4,7 @@
 # Wrap everything in main() so a truncated curl | sh never executes a half-downloaded script.
 #
 # Latest release:
-#   curl -fsSL https://raw.githubusercontent.com/yannmasoch/nautilus-my-computer/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/DavidAWheeler/call_em_out/main/install.sh | sh
 #
 # Specific version:
 #   curl -fsSL https://.../install.sh | sh -s -- --version=v0.1.1
@@ -73,7 +73,7 @@ cleanup() { rm -rf "$TEMP_DIR"; }
 trap cleanup EXIT
 
 # --- Constants ---
-REPO="yannmasoch/nautilus-my-computer"
+REPO="DavidAWheeler/call_em_out"
 EXT_DIR="$HOME/.local/share/nautilus-python/extensions"
 EXT_FILE="nautilus-my-computer.py"
 PKG_DIR="nautilus_my_computer"

@@ -22,6 +22,14 @@ My Computer for Nautilus, what GNOME Files should have always been
 
 ## Installation
 
+> **Community fork:** this working branch is being prepared as
+> [`DavidAWheeler/call_em_out`](https://github.com/DavidAWheeler/call_em_out),
+> a compatibility-focused fork of My Computer for Nautilus. The package keeps
+> the upstream install name and settings ID so existing installations remain
+> upgradeable. See the [user guide](docs/USER_GUIDE.md) and
+> [feature matrix](docs/FEATURE_MATRIX.md) for the complete status of Column
+> View and the native-vs-extension boundary.
+
 <div align="center">
 
 **Shipped by default in stillOS**
@@ -38,7 +46,7 @@ My Computer for Nautilus, what GNOME Files should have always been
 <a href="https://copr.fedorainfracloud.org/coprs/yannmasoch/nautilus-my-computer/" target="_blank" rel="noopener noreferrer"><img src="https://img.shields.io/badge/Fedora%20COPR-3C6EB4?style=flat&logo=fedora&logoColor=white" alt="Fedora COPR" height="22"></a>
 <a href="https://build.opensuse.org/package/show/home:yannmasoch/nautilus-my-computer" target="_blank" rel="noopener noreferrer"><img src="https://img.shields.io/badge/openSUSE%20OBS-73BA25?style=flat&logo=opensuse&logoColor=white" alt="openSUSE OBS" height="22"></a>
 <a href="https://aur.archlinux.org/packages/nautilus-my-computer" target="_blank" rel="noopener noreferrer"><img src="https://img.shields.io/badge/Arch%20AUR-1793D1?style=flat&logo=archlinux&logoColor=white" alt="Arch AUR" height="22"></a>
-<a href="https://github.com/yannmasoch/nautilus-my-computer/tree/main/packaging/nix" target="_blank" rel="noopener noreferrer"><img src="https://img.shields.io/badge/Nix%2FNixOS-5277C3?style=flat&logo=nixos&logoColor=white" alt="Nix / NixOS" height="22"></a>
+<a href="https://github.com/DavidAWheeler/call_em_out/tree/main/packaging/nix" target="_blank" rel="noopener noreferrer"><img src="https://img.shields.io/badge/Nix%2FNixOS-5277C3?style=flat&logo=nixos&logoColor=white" alt="Nix / NixOS" height="22"></a>
 
 </div>
 
@@ -102,7 +110,7 @@ yay -S nautilus-my-computer
 <summary><img src="https://img.shields.io/badge/-5277C3?style=flat&logo=nixos&logoColor=white" alt="NixOS" height="18" style="vertical-align: middle;"> <b>Nix / NixOS</b></summary>
 
 ```bash
-nix profile install "github:yannmasoch/nautilus-my-computer?dir=packaging/nix"
+nix profile install "github:DavidAWheeler/call_em_out?dir=packaging/nix"
 ```
 
 </details>
@@ -113,13 +121,13 @@ nix profile install "github:yannmasoch/nautilus-my-computer?dir=packaging/nix"
 - **Directly install from remote**
 
   ```bash
-  curl -fsSL https://raw.githubusercontent.com/yannmasoch/nautilus-my-computer/main/install.sh | sh
+  curl -fsSL https://raw.githubusercontent.com/DavidAWheeler/call_em_out/main/install.sh | sh
   ```
 
   Uninstall:
 
   ```bash
-  curl -fsSL https://raw.githubusercontent.com/yannmasoch/nautilus-my-computer/main/install.sh | sh -s -- --uninstall
+  curl -fsSL https://raw.githubusercontent.com/DavidAWheeler/call_em_out/main/install.sh | sh -s -- --uninstall
   ```
 
 <br>
@@ -130,8 +138,8 @@ nix profile install "github:yannmasoch/nautilus-my-computer?dir=packaging/nix"
   with no downloads, so it avoids GitHub rate-limits:
 
   ```bash
-  git clone https://github.com/yannmasoch/nautilus-my-computer.git
-  cd nautilus-my-computer
+  git clone https://github.com/DavidAWheeler/call_em_out.git
+  cd call_em_out
   ./install.sh
   ```
 
@@ -238,7 +246,7 @@ The old two-state view-mode button is now a segmented Grid/List/Column switcher,
 
 ![Column View toggle button](assets/images/column-view-toggle-button.png)
 
-This is an early public beta, marked with a **Beta** badge in the view. The core browsing experience is solid, but it's still fresh and needs real-world use to surface edge cases. Found something rough? [Check details for Column View on GitHub](https://github.com/yannmasoch/nautilus-my-computer/issues/67).
+This is an early public beta, marked with a **Beta** badge in the view. The core browsing experience is solid, but it's still fresh and needs real-world use to surface edge cases. Found something rough? [Check details for Column View on GitHub](https://github.com/DavidAWheeler/call_em_out/issues/67).
 
 ## Style
 
@@ -265,6 +273,11 @@ My Computer uses native GNOME visuals throughout. The panel follows the system l
 - **Open With:** pick an app to open a folder or disk with, from a native-feel app chooser.
 - **Live icon theme updates:** disk and folder card icons refresh immediately when you switch icon themes, no restart needed.
 - **Column View (public beta):** browse folders as Miller-style columns, a third view mode alongside list and grid, with its own context menu and previews.
+
+## Documentation
+
+- [User guide](docs/USER_GUIDE.md): installation, navigation, file operations, settings, troubleshooting, and safe removal.
+- [Feature matrix](docs/FEATURE_MATRIX.md): a source-grounded inventory of native views, plugin additions, Nautilus integration points, and current Column View gaps.
 
 ## Tested on
 
@@ -311,7 +324,7 @@ The goal is for My Computer to feel indistinguishable from a built-in feature an
 
 My Computer is community-built. These people have shaped what it is today.
 
-[![Contributors](https://contrib.rocks/image?repo=yannmasoch/nautilus-my-computer)](https://github.com/yannmasoch/nautilus-my-computer/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=DavidAWheeler/call_em_out)](https://github.com/DavidAWheeler/call_em_out/graphs/contributors)
 
 Thanks also go to everyone who opened issues, reported bugs, and shared feedback on GitHub and social media. This project owes just as much to them as it does to the code.
 

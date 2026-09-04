@@ -1855,7 +1855,7 @@ class _ColumnViewHost:
             step = column.page_step()
             target = count - 1 if step is None else min(count - 1, current + step)
 
-        if target == current and not extend:
+        if target == current:
             return True
 
         item = column.select_index(target, extend=extend)

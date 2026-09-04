@@ -271,6 +271,18 @@ ensure_gettext() {
     fi
 }
 
+# A distro package and a user-local checkout are both discovered by
+# nautilus-python. Keeping both installed loads two providers and produces
+# duplicate Computer rows plus competing event handlers. The local checkout
+# is the requested installation, so remove only the same-named distro package
+# before copying it into the user extension directory.
+remove_conflicting_system_install() {
+    if command -v dpkg-query >/dev/null 2>&1 \
+        && [ "$(dpkg-query -W -f='${db:Status-Status}' nautilus-my-computer 2>/dev/null || true)" = "installed" ]; then
+        "$SUDO" apt-get remove -y nautilus-my-computer
+    fi
+}
+
 # --- Dependency check ---
 check_dependencies() {
     missing="" tools="python3 glib-compile-schemas gsettings"
@@ -414,6 +426,7 @@ do_install() {
     detect_pm
     ensure_nautilus_python
     ensure_gettext
+    remove_conflicting_system_install
 
     echo ""
     printf '%s\n' "${BOLD}Install${RESET}"

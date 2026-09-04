@@ -902,7 +902,13 @@ class _ColumnViewHost:
             gesture.set_state(Gtk.EventSequenceState.DENIED)
             return
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        # The list-item container is intentionally non-focusable to avoid a
+        # premature GTK focus ring. Give the column focus explicitly here so
+        # the next arrow key is handled by our Miller controller after a mouse
+        # click instead of being left with Nautilus's hidden native view.
+        column.grab_list_focus()
         column._on_row_activated_internal(row)
+        self._arm_focus_retry(self._focused_column())
 
     def _on_row_right_clicked(
         self,
@@ -963,9 +969,9 @@ class _ColumnViewHost:
         )
         sections = [
             open_actions,
-            clipboard_actions_section(
-                cut_action=lambda: self._copy_to_clipboard(uri, cut=True),
-                copy_action=lambda: self._copy_to_clipboard(uri, cut=False),
+                clipboard_actions_section(
+                    cut_action=lambda: self._copy_to_clipboard([uri], cut=True),
+                    copy_action=lambda: self._copy_to_clipboard([uri], cut=False),
                 paste_action=(lambda: self._paste_into_folder(uri))
                 if self._clipboard_has_pasteable_files()
                 else None,
@@ -979,7 +985,7 @@ class _ColumnViewHost:
                     else None
                 ),
                 move_to_trash_action=(
-                    (lambda: self._move_to_trash(column, uri))
+                    (lambda: self._move_to_trash(column, [uri]))
                     if uri.startswith("file://")
                     else None
                 ),
@@ -1050,12 +1056,18 @@ class _ColumnViewHost:
             item_kind="folder" if row.is_dir else "file",
         )
 
-    def _move_to_trash(self, source_column: Gtk.Widget, uri: str) -> None:
+    def _move_to_trash(self, source_column: Gtk.Widget, uris: list[str]) -> None:
         """Run Nautilus's own trash operation, including its undo manager."""
-        parent = Gio.File.new_for_uri(uri).get_parent()
-        if parent is not None:
-            self._watch_operation_directories([parent.get_uri()])
-        self._call_nautilus_file_operation("TrashURIs", GLib.Variant("(asa{sv})", ([uri], {})), uri)
+        watch_uris = []
+        for uri in uris:
+            parent = Gio.File.new_for_uri(uri).get_parent()
+            if parent is not None:
+                watch_uris.append(parent.get_uri())
+        self._watch_operation_directories(watch_uris)
+        display_uri = uris[0] if uris else ""
+        self._call_nautilus_file_operation(
+            "TrashURIs", GLib.Variant("(asa{sv})", (uris, {})), display_uri
+        )
 
     def _call_nautilus_file_operation(
         self, method: str, parameters: GLib.Variant, uri: str, *, on_started=None
@@ -1094,20 +1106,20 @@ class _ColumnViewHost:
             None,
         )
 
-    def _copy_to_clipboard(self, uri: str, *, cut: bool) -> None:
-        """Publish one Miller item as standard and Nautilus clipboard data."""
-        file_list = Gdk.FileList.new_from_list([Gio.File.new_for_uri(uri)])
+    def _copy_to_clipboard(self, uris: list[str], *, cut: bool) -> None:
+        """Publish Miller items as standard and Nautilus clipboard data."""
+        file_list = Gdk.FileList.new_from_list([Gio.File.new_for_uri(uri) for uri in uris])
         value = GObject.Value()
         value.init(Gdk.FileList)
         value.set_boxed(file_list)
         file_provider = Gdk.ContentProvider.new_for_value(value)
-        nautilus_data = f"{'cut' if cut else 'copy'}\n{uri}".encode()
+        nautilus_data = ("\n".join(["cut" if cut else "copy", *uris])).encode()
         nautilus_provider = Gdk.ContentProvider.new_for_bytes(
             "x-special/gnome-copied-files", GLib.Bytes.new(nautilus_data)
         )
         provider = Gdk.ContentProvider.new_union([file_provider, nautilus_provider])
         self._clipboard.set_content(provider)
-        self._set_miller_clipboard_state([uri], cut=cut)
+        self._set_miller_clipboard_state(uris, cut=cut)
 
     def _open_file(self, uri: str) -> None:
         """Launch a file with its default application."""
@@ -1300,21 +1312,22 @@ class _ColumnViewHost:
     # own selection. Rename is the one exception -- see below.
 
     def trash_focused_folder(self) -> bool:
-        """Move the focused local Miller item to trash (the Delete target)."""
+        """Move the selected local Miller items to trash (the Delete target)."""
         column = self._focused_column()
-        item = column.selected_item() if column is not None else None
-        if item is None or not item.uri.startswith("file://"):
+        items = column.selected_items() if column is not None else []
+        uris = [item.uri for item in items if item.uri.startswith("file://")]
+        if not uris:
             return False
-        self._move_to_trash(column, item.uri)
+        self._move_to_trash(column, uris)
         return True
 
     def copy_focused_folder_to_clipboard(self, *, cut: bool) -> bool:
-        """Copy or cut the focused Miller item (the Ctrl+X/Ctrl+C targets)."""
+        """Copy or cut the selected Miller items (Ctrl+X/Ctrl+C targets)."""
         column = self._focused_column()
-        item = column.selected_item() if column is not None else None
-        if item is None:
+        items = column.selected_items() if column is not None else []
+        if not items:
             return False
-        self._copy_to_clipboard(item.uri, cut=cut)
+        self._copy_to_clipboard([item.uri for item in items], cut=cut)
         return True
 
     def paste_into_focused_folder(self) -> bool:
@@ -1749,7 +1762,7 @@ class _ColumnViewHost:
         the native binding silently no-ops. Left/Right worked immediately
         because they're entirely our own code, independent of that. Up/Down/
         Home/End/Page Up/Page Down are handled explicitly below instead
-        (_move_column_selection), driving the column's Gtk.SingleSelection
+        (_move_column_selection), driving the column's GTK selection model
         directly -- this was the plan's stated fallback for exactly this
         case, not a new approach.
 
@@ -1776,11 +1789,10 @@ class _ColumnViewHost:
         if column is None:
             return False
 
-        # Shift has no meaning of its own yet for Left/Right/Return --
-        # range selection is out of scope for #91 (see PR #146's
-        # multi-selection work) -- so those combinations fall straight
-        # through to the same swallow every other unclaimed key gets below,
-        # rather than running the plain-key action.
+        # Shift extends vertical selection, but it does not turn Left/Right
+        # into path navigation or Return into activation. Those combinations
+        # are intentionally consumed below without performing the plain-key
+        # action.
         shift = bool(int(gtk_state) & Gdk.ModifierType.SHIFT_MASK)
         if not shift:
             if keyval in (Gdk.KEY_Left, Gdk.KEY_KP_Left):
@@ -1790,13 +1802,15 @@ class _ColumnViewHost:
             if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_ISO_Enter):
                 return self._open_selection(column)
         if keyval in _COLUMN_NAV_KEYVALS:
-            return self._move_column_selection(column, keyval)
+            return self._move_column_selection(column, keyval, extend=shift)
 
         return True
 
-    def _move_column_selection(self, column: Gtk.Widget, keyval: int) -> bool:
-        """Up/Down/Home/End/Page Up/Page Down: move column's own selection
-        directly against its Gtk.SingleSelection (see _on_key_pressed's
+    def _move_column_selection(
+        self, column: Gtk.Widget, keyval: int, *, extend: bool = False
+    ) -> bool:
+        """Up/Down/Home/End/Page Up/Page Down: move the column's selection
+        directly against its GTK selection model (see _on_key_pressed's
         docstring for why this isn't left to Gtk.ListView's native
         bindings). With nothing selected yet, Up/Down/Home/Page Up all land
         on the first row and End/Page Down on the last -- the same "start
@@ -1841,12 +1855,12 @@ class _ColumnViewHost:
             step = column.page_step()
             target = count - 1 if step is None else min(count - 1, current + step)
 
-        if target == current:
+        if target == current and not extend:
             return True
 
-        item = column.select_index(target)
+        item = column.select_index(target, extend=extend)
         column.list_view.scroll_to(target, Gtk.ListScrollFlags.NONE, None)
-        if item is not None:
+        if item is not None and not extend:
             self._arm_row_commit(column, item)
         return True
 

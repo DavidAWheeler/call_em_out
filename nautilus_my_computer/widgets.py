@@ -1730,9 +1730,12 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         # it is not (see page_step, which derives the visible count from the
         # adjustment instead).
         self._store: Gio.ListStore = Gio.ListStore(item_type=_ColumnRowItem)
-        self._selection = Gtk.SingleSelection(
-            model=self._store, autoselect=False, can_unselect=True
-        )
+        self._selection = Gtk.MultiSelection(model=self._store)
+        # Gtk.MultiSelection has no concept of a keyboard cursor. Keep the
+        # cursor and Shift-selection anchor beside the model selection so a
+        # recycled ListView row never becomes the source of truth.
+        self._cursor_index: int | None = None
+        self._selection_anchor: int | None = None
         self._row_widgets: dict[int, MyComputerColumnRow] = {}
 
         factory = Gtk.SignalListItemFactory()
@@ -1886,6 +1889,8 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         self._cancellable.cancel()
         self._cancellable = Gio.Cancellable()
         self._loaded = False
+        self._cursor_index = None
+        self._selection_anchor = None
         self._show_empty_page(False)
         self._store.remove_all()
         self._load()
@@ -2113,15 +2118,19 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         seeding the view from the current location's ancestor chain."""
         index = self._index_for_uri(uri)
         if index is not None:
-            self._selection.select_item(index, True)
+            self.select_index(index)
 
     def clear_selection(self) -> None:
         """Drop this column's own row selection -- used by column_view.py's
         _on_real_row_activated so only the row that led to the current
         column/preview stays highlighted, never an earlier column too."""
         self._selection.unselect_all()
+        self._cursor_index = None
+        self._selection_anchor = None
 
-    def select_index(self, index: int) -> "_ColumnRowItem | None":
+    def select_index(
+        self, index: int, *, extend: bool = False
+    ) -> "_ColumnRowItem | None":
         """Select this column's entry at index (clamped into range) and
         return its model item, or None if the folder is empty (or hasn't
         finished enumerating yet).
@@ -2130,12 +2139,34 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         column_view.py's _focus_child_column and _move_column_selection).
         Returning the item is the whole contract: nothing here notifies
         anyone that the selection moved, so the caller arms the Miller
-        commit explicitly off what it gets back."""
+        commit explicitly off what it gets back. ``extend`` is used for
+        Shift+arrow range selection and deliberately does not change the
+        Miller path by itself."""
         n = self._store.get_n_items()
         if n == 0:
             return None
         index = max(0, min(index, n - 1))
+        if extend:
+            return self.extend_selection_to(index)
         self._selection.select_item(index, True)
+        self._cursor_index = index
+        self._selection_anchor = index
+        return self._store.get_item(index)
+
+    def extend_selection_to(self, index: int) -> "_ColumnRowItem | None":
+        """Extend the model selection from its anchor through ``index``."""
+        n = self._store.get_n_items()
+        if n == 0:
+            return None
+        index = max(0, min(index, n - 1))
+        if self._selection_anchor is None:
+            self._selection_anchor = (
+                self._cursor_index if self._cursor_index is not None else index
+            )
+        start = min(self._selection_anchor, index)
+        self._selection.unselect_all()
+        self._selection.select_range(start, abs(index - self._selection_anchor) + 1)
+        self._cursor_index = index
         return self._store.get_item(index)
 
     def select_first(self) -> "_ColumnRowItem | None":
@@ -2145,11 +2176,10 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         return self.select_index(0)
 
     def has_selection(self) -> bool:
-        return self._selection.get_selected_item() is not None
+        return self._cursor_index is not None
 
     def selected_index(self) -> int | None:
-        pos = self._selection.get_selected()
-        return None if pos == Gtk.INVALID_LIST_POSITION else pos
+        return self._cursor_index
 
     def item_count(self) -> int:
         return self._store.get_n_items()
@@ -2261,7 +2291,17 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         GtkListView's recycling an item scrolled out of view has no widget at
         all, so a selection-driven shortcut keyed off the widget would
         silently do nothing purely because the user had scrolled away."""
-        return self._selection.get_selected_item()
+        if self._cursor_index is None:
+            return None
+        return self._store.get_item(self._cursor_index)
+
+    def selected_items(self) -> list["_ColumnRowItem"]:
+        """Return selected model entries in their folder order."""
+        return [
+            self._store.get_item(index)
+            for index in range(self._store.get_n_items())
+            if self._selection.is_selected(index)
+        ]
 
     def selected_row(self) -> "MyComputerColumnRow | None":
         """The currently selected row's widget, if it is realized (scrolled
@@ -2269,7 +2309,7 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         live widget, per GtkListView's recycling model. Prefer
         selected_item() unless a real widget is genuinely required (only
         Rename is, as a popover anchor -- see with_selected_row)."""
-        item = self._selection.get_selected_item()
+        item = self.selected_item()
         if item is None:
             return None
         return self._row_widgets.get(id(item))
@@ -2283,8 +2323,8 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         wait is a bounded tick callback rather than one GLib.idle_add because
         the bind happens during the frame-clock layout that scroll_to
         schedules, which a single default-priority idle can still beat."""
-        position = self._selection.get_selected()
-        if position == Gtk.INVALID_LIST_POSITION:
+        position = self._cursor_index
+        if position is None or position == Gtk.INVALID_LIST_POSITION:
             return False
         item = self._store.get_item(position)
         if item is None:

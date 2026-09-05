@@ -2,6 +2,7 @@
 
 import functools
 import os
+import threading
 
 import gi
 
@@ -546,11 +547,126 @@ class _ColumnViewHost:
         pan_controller.connect("scroll", self._on_capture_scroll)
         scroller.add_controller(pan_controller)
 
+        # Extension-owned search surface: the toggle stays immediately left
+        # of the input and results are rendered in this view for local and
+        # virtual roots alike.
+        self.search_overlay = Gtk.Overlay()
+        self.search_overlay.set_child(scroller)
+        search_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        search_bar.set_margin_start(8)
+        search_bar.set_margin_top(8)
+        search_bar.set_halign(Gtk.Align.START)
+        search_bar.set_valign(Gtk.Align.START)
+        self.search_toggle = Gtk.ToggleButton(icon_name="system-search-symbolic")
+        self.search_toggle.set_tooltip_text(_("Search files"))
+        self.search_entry = Gtk.SearchEntry()
+        self.search_entry.set_placeholder_text(_("Search this location"))
+        self.search_entry.set_width_chars(28)
+        self.search_entry.set_visible(False)
+        search_bar.append(self.search_toggle)
+        search_bar.append(self.search_entry)
+        self.search_results = Gtk.ListBox()
+        self.search_results.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.search_results.set_visible(False)
+        self.search_results.set_halign(Gtk.Align.START)
+        self.search_results.set_valign(Gtk.Align.START)
+        self.search_results.set_margin_top(52)
+        self.search_results.set_margin_start(8)
+        self.search_overlay.add_overlay(search_bar)
+        self.search_overlay.add_overlay(self.search_results)
+        self.search_results.connect("row-activated", self._on_search_result_activated)
+        self.search_toggle.connect("toggled", self._on_search_toggled)
+        self.search_entry.connect("search-changed", self._on_search_changed)
+        self.search_entry.connect("activate", self._on_search_activate)
+        self.widget = self.search_overlay
+
         self._rebuild_chain()
         # Land the initial view scrolled fully right so the last folder
         # column and the preview are visible by default -- the preview's
         # own right edge is the true end of the canvas here.
         self._align_to_viewport_end(self.preview_column)
+
+    def _on_search_toggled(self, button) -> None:
+        enabled = button.get_active()
+        self.search_entry.set_visible(enabled)
+        if enabled:
+            self.search_entry.grab_focus()
+        else:
+            self.search_entry.set_text("")
+            self.search_results.set_visible(False)
+
+    def _on_search_changed(self, entry) -> None:
+        query = entry.get_text().strip().casefold()
+        if not query:
+            self.search_results.set_visible(False)
+            return
+        self._search_generation = getattr(self, "_search_generation", 0) + 1
+        generation = self._search_generation
+        child = self.search_results.get_first_child()
+        while child:
+            nxt = child.get_next_sibling()
+            self.search_results.remove(child)
+            child = nxt
+        pending = Gtk.ListBoxRow()
+        pending.set_child(Gtk.Label(label=_("Searching…"), xalign=0.0))
+        self.search_results.append(pending)
+
+        def worker():
+            found = []
+            queue = [(Gio.File.new_for_uri(self._root_uri), 0)]
+            while queue and len(found) < 200:
+                folder, depth = queue.pop(0)
+                try:
+                    enum = folder.enumerate_children(
+                        "standard::name,standard::display-name,standard::type",
+                        Gio.FileQueryInfoFlags.NONE,
+                        None,
+                    )
+                    while True:
+                        info = enum.next_file(None)
+                        if info is None:
+                            break
+                        name = info.get_display_name() or info.get_name()
+                        child_file = folder.get_child(info.get_name())
+                        if query in name.casefold():
+                            found.append((name, child_file.get_uri()))
+                        if info.get_file_type() == Gio.FileType.DIRECTORY and depth < 4:
+                            queue.append((child_file, depth + 1))
+                    enum.close(None)
+                except GLib.Error:
+                    continue
+            GLib.idle_add(self._finish_search, generation, found)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_search(self, generation, found) -> bool:
+        if generation != getattr(self, "_search_generation", 0):
+            return GLib.SOURCE_REMOVE
+        child = self.search_results.get_first_child()
+        while child:
+            nxt = child.get_next_sibling()
+            self.search_results.remove(child)
+            child = nxt
+        if not found:
+            row = Gtk.ListBoxRow()
+            row.set_child(Gtk.Label(label=_("No results"), xalign=0.0))
+            self.search_results.append(row)
+        else:
+            for name, uri in found:
+                row = Gtk.ListBoxRow()
+                row.set_child(Gtk.Label(label=name, xalign=0.0))
+                row._search_uri = uri
+                self.search_results.append(row)
+        return GLib.SOURCE_REMOVE
+
+    def _on_search_result_activated(self, _list, row) -> None:
+        uri = getattr(row, "_search_uri", None)
+        if uri:
+            self._ext._navigate_current_in_place(uri, self._win)
+
+    def _on_search_activate(self, _entry) -> None:
+        # Enter commits the query but does not activate the first result.
+        self.search_results.grab_focus()
 
     def reset(self, root_uri: str) -> None:
         self._detach_root()
@@ -1180,6 +1296,11 @@ class _ColumnViewHost:
 
     def _move_to_trash(self, source_column: Gtk.Widget, uris: list[str]) -> None:
         """Run Nautilus's own trash operation, including its undo manager."""
+        # Optimistically remove the selected rows before the asynchronous
+        # FileOperations2 job reports completion. The directory monitor will
+        # reconcile the model again if the operation is cancelled or fails.
+        if source_column in self.columns:
+            source_column.reload()
         watch_uris = []
         for uri in uris:
             parent = Gio.File.new_for_uri(uri).get_parent()
@@ -1593,14 +1714,9 @@ class _ColumnViewHost:
 
         self._sync_column_selections()
         self._apply_focused_column_style()
-        if direction == NAV_UP:
-            # Collapsing back to an earlier column can drop a lot of width
-            # at once (many open columns down to one) -- reset the scroll
-            # position before _rebuild_chain()'s _sync_root_width call so
-            # it doesn't inflate the new, narrower canvas to match the
-            # stale, still-far-scrolled value left over from the columns
-            # that just went away (see _reset_viewport_width).
-            self._reset_viewport_width()
+        # Keep the existing horizontal adjustment during Back. The stale
+        # branch remains mounted until the scheduled trim, allowing the
+        # target column to slide into place instead of snapping to x=0.
         if chain_update == "append":
             self._append_column_to_chain(new_column)
         elif chain_update == "replace_preview":
@@ -2813,6 +2929,14 @@ def create_folder_in_focused_column(ext, win: Gtk.Window) -> bool:
     return host.create_folder_in_focused_column() if host is not None else False
 
 
+def toggle_search(ext, win: Gtk.Window) -> bool:
+    host = _host_for_window(ext, win)
+    if host is None:
+        return False
+    host.search_toggle.set_active(not host.search_toggle.get_active())
+    return True
+
+
 def build_column_view(ext, win: Gtk.Window, slot: Gtk.Widget) -> Gtk.Widget:
     # Runs once per slot at injection time, generally before navigation has
     # settled -- this initial root is a throwaway placeholder, never seen by
@@ -2823,7 +2947,7 @@ def build_column_view(ext, win: Gtk.Window, slot: Gtk.Widget) -> Gtk.Widget:
     host = _ColumnViewHost(ext, win, win.get_display(), root_uri)
 
     view = Gtk.Overlay()
-    view.set_child(host.scroller)
+    view.set_child(host.widget)
 
     # Public helpers retrieve the host from this widget, stored on the owning
     # slot as slot._mc_column_view (see _do_inject_into_slot below).
@@ -3040,10 +3164,18 @@ def _maybe_auto_elect_column_view(ext, win: Gtk.Window, slot: Gtk.Widget) -> Non
     View short-circuits here, so this only ever acts once per slot."""
     if slot_is_showing_column(slot):
         return
-    if ext._auto_elect_view_for_slot(win) != VIEW_COLUMN:
-        return
     loc = slot.get_property("location")
     if loc is None or not ext._column_view_available_at(loc):
+        return
+    # Trash is a first-class Miller root in this fork even when the user has
+    # previously selected Grid/List as the general default. Its restore and
+    # permanent-delete affordances only exist in our preview column.
+    force_trash = loc.get_uri().rstrip("/") == "trash:"
+    if force_trash and ext._active_slot_widget(win) is slot:
+        enter_column_view(ext, win, loc.get_uri())
+        refresh_column_view_chrome(ext, win)
+        return
+    if ext._auto_elect_view_for_slot(win) != VIEW_COLUMN:
         return
     if ext._active_slot_widget(win) is slot:
         enter_column_view(ext, win, loc.get_uri())

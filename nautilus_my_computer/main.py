@@ -1349,6 +1349,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             )
             return consumed
         if keyval in (Gdk.KEY_f, Gdk.KEY_F) and gtk_state & Gdk.ModifierType.CONTROL_MASK:
+            if self._active_slot_showing_column(win) and column_view.toggle_search(self, win):
+                return True
             # Computer view uses the native location entry as its card
             # filter. Handle this before Nautilus's global-search actions so
             # Ctrl+F is a reliable on/off toggle while that panel is visible.

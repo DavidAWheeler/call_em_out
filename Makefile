@@ -6,8 +6,8 @@
 #   make build
 #   make DESTDIR="$pkgdir" PREFIX=/usr install
 #
-# For local dev iteration against ~/.local, see CLAUDE.md's "Install and test
-# cycle" instead, this Makefile targets system package installs only.
+# For local development against ~/.local, use install.sh; this Makefile targets
+# system package installs only.
 
 PREFIX  ?= /usr
 DESTDIR ?=

@@ -15,16 +15,6 @@ venv/
 __pycache__/
 *.pyc
 
-# Personal workflow customization
-.claude/
-.claudeignore
-CLAUDE.md
-
-# Additional personal workflow customization
-.codex/
-.codex-skills/
-AGENTS.md
-
 # Temporary files & working directories
 project/
 tasks/

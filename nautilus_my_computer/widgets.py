@@ -480,7 +480,9 @@ class MyComputerFolderCard(Gtk.Widget):
         # CAPTURE, matching nautilus-list-base.c:1373 -- runs ahead of the
         # BUBBLE-phase click gesture above so a drag on primary press isn't
         # shadowed by it.
-        drag.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        # Bubble from the row after GtkListView has recognised the pointer
+        # sequence; capture prevented the drag gesture from arming on GTK 4.18.
+        drag.set_propagation_phase(Gtk.PropagationPhase.BUBBLE)
         drag.connect("prepare", self._on_drag_prepare)
         drag.connect("drag-begin", self._on_drag_begin)
         drag.connect("drag-end", self._on_drag_end)
@@ -1265,6 +1267,7 @@ class MyComputerColumnRow(Gtk.Box):
     def _on_drag_prepare(self, _source, _x: float, _y: float):
         if self.item is None:
             return None
+        _log(f"drag prepare uri={self.item.uri!r}")
         column = getattr(self, "_column", None)
         on_files_dragged = getattr(column, "_on_files_dragged", None)
         if on_files_dragged is not None:

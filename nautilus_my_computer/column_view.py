@@ -1072,7 +1072,16 @@ class _ColumnViewHost:
                 self.focused_index = self.columns.index(column)
                 self._apply_focused_column_style()
             if index is not None and (ctrl or shift or not column._selection.is_selected(index)):
-                column.select_for_pointer(index, ctrl=ctrl, shift=shift)
+                # Nautilus may leave the first row as the keyboard cursor
+                # without a committed selection. The first Ctrl-click must
+                # preserve that anchor so a second Ctrl-click can add to it.
+                preserve_anchor = (
+                    ctrl
+                    and column._selection.is_selected(index)
+                    and len(column.selected_items()) == 1
+                )
+                if not preserve_anchor:
+                    column.select_for_pointer(index, ctrl=ctrl, shift=shift)
             # Modifier-click is selection-only, like Nautilus and other file
             # managers. Keep the row gesture unclaimed so a drag can still
             # win, but remember the intent for the matching release.

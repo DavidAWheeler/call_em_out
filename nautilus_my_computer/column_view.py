@@ -2076,6 +2076,10 @@ class _ColumnViewHost:
         # targets a column this is about to collapse or replace.
         self._cancel_row_commit()
         self._set_preview(None)
+        # _set_preview constructs a fresh empty preview widget.  Swap it into
+        # the existing paned chain now; leaving the old widget mounted was
+        # the source of stale document previews after Back.
+        self._replace_preview_in_chain()
         # Keyboard nav treats the deepest remaining column as "current"
         # rather than its parent -- Left/Right walk columns directly, so the
         # accent highlight should land where the arrows would next act, not

@@ -534,6 +534,18 @@ _CSS = b"""
 .mc-preview-column {
     padding: 12px;
 }
+/* Preview metadata is read from the trailing pane at a distance.  Keep it
+   comfortably larger than list-row captions in both dark and light themes. */
+.mc-preview-details label {
+    font-size: 1.12em;
+}
+.mc-preview-details .caption {
+    font-size: 1em;
+}
+.mc-preview-details button {
+    min-height: 34px;
+    font-size: 1.08em;
+}
 /* Preview thumbnail: rounded corners. The Gtk.Picture sets overflow:hidden so
    this radius clips the drawn image. 12px matches .card / .nautilus-view-cell. */
 .mc-preview-image {

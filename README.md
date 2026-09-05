@@ -1,6 +1,17 @@
-# Like spicy My Computer for Nautilus
+# call_em_out
 
-`call_em_out` is like spicy My Computer for Nautilus: a personal fork of [My Computer for Nautilus](https://github.com/yannmasoch/nautilus-my-computer). The original project and its author deserve the credit for the extension and its Computer view. This fork keeps that foundation and experiments with a more usable Column View for one desktop setup.
+`call_em_out` is a ramshackle attempt to improve the Column View work started by the person who made the plugin we forked: [My Computer for Nautilus](https://github.com/yannmasoch/nautilus-my-computer). The original author deserves credit for the extension, its Computer view, and the Column View foundation. This is a personal, occasionally spicy set of usability experiments on top of that work.
+
+## Install
+
+Clone this fork, enter its folder, and run:
+
+```sh
+./install.sh
+nautilus --quit
+```
+
+Open Files again. The installer puts the extension in your user data directory; it does not require copying files by hand.
 
 ## What this fork changes
 

@@ -1,6 +1,17 @@
-# Like spicy My Computer for Nautilus
+# call_em_out user guide
 
-This is like spicy My Computer for Nautilus: a respectful personal fork of [My Computer for Nautilus](https://github.com/yannmasoch/nautilus-my-computer). It keeps the original Computer panel and Column View, then makes selected interactions more practical for a personal desktop. It does not add the original Column View or replace Nautilus.
+`call_em_out` is a ramshackle attempt to improve the Column View work started by the person who made the plugin we forked: [My Computer for Nautilus](https://github.com/yannmasoch/nautilus-my-computer). It keeps the original Computer panel and Column View, then adds practical experiments for a personal desktop. It does not add the original Column View or replace Nautilus.
+
+## Install it
+
+```sh
+git clone https://github.com/DavidAWheeler/call_em_out.git
+cd call_em_out
+./install.sh
+nautilus --quit
+```
+
+Reopen Files. The installer is user-local and can be run again after updating the checkout.
 
 ## Current improvements
 

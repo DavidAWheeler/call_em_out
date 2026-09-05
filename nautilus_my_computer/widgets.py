@@ -2786,6 +2786,7 @@ class MyComputerPreviewColumn(Gtk.Box):
         preview_area.append(self._thumb_revealer)
 
         details_area = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        details_area.add_css_class("mc-preview-details")
         details_area.set_halign(Gtk.Align.FILL)
         details_area.set_valign(Gtk.Align.END)
         details_area.set_vexpand(False)
@@ -2840,8 +2841,8 @@ class MyComputerPreviewColumn(Gtk.Box):
         self._delete_button.connect("clicked", self._delete_trash_item)
         self._restore_button.set_hexpand(True)
         self._delete_button.set_hexpand(True)
-        self._trash_actions.append(self._delete_button)
         self._trash_actions.append(self._restore_button)
+        self._trash_actions.append(self._delete_button)
         self._trash_actions.set_visible(False)
         details_area.append(self._trash_actions)
 

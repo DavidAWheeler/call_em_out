@@ -967,7 +967,10 @@ class _ColumnViewHost:
         if trash_files:
             self._restore_trash_drag(trash_files, destination)
             return True
-        if destination_uri.startswith("trash:") and action == Gdk.DragAction.MOVE:
+        # Trash is a move-only destination. GTK may report COPY when the
+        # source advertises both actions, but dropping into an open Trash
+        # column must have the same semantics as dropping on the bookmark.
+        if destination_uri.startswith("trash:"):
             for source in files:
                 source.trash_async(GLib.PRIORITY_DEFAULT, None, None, None)
             return True
@@ -2084,7 +2087,10 @@ class _ColumnViewHost:
         # Keep the deeper branch mounted until the scroll animation reaches
         # the ancestor. Rebuilding or resetting here makes Back snap while
         # Left-arrow uses the smooth hadjustment path.
-        self._align_to_viewport_start(self.columns[idx])
+        # Leave a narrow edge of the parent column visible.  Aligning to the
+        # absolute start here made Back appear to teleport and hide the
+        # before/after columns; the small inset matches arrow navigation.
+        self._align_to_viewport_pos(self.columns[idx], 24)
         # Deliberately no _arm_focus_retry call here: focused_index/the accent
         # highlight track the new location just above, but selecting a
         # column (click or the echo of one) no longer grabs GTK keyboard

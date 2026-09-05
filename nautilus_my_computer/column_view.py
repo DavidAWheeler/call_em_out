@@ -917,11 +917,22 @@ class _ColumnViewHost:
         column = self._make_real_column(uri, on_row_activated=activate)
         column.set_halign(Gtk.Align.START)
         column.set_valign(Gtk.Align.FILL)
-        column.set_margin_start(COLUMN_WIDTH * (len(self._search_folder_columns) + 1))
         column.set_vexpand(True)
         self.search_overlay.add_overlay(column)
         self._search_folder_columns.append(column)
+        # Gtk's measured result width can temporarily exceed its requested
+        # Miller width while long names settle. Position from the *rendered*
+        # result edge, never a guessed constant, so child columns cannot
+        # overlap or appear in the middle of the result list.
+        GLib.idle_add(self._position_search_folder_columns)
         column.grab_list_focus()
+
+    def _position_search_folder_columns(self) -> bool:
+        offset = self.search_result_column.get_width() or COLUMN_WIDTH
+        for column in self._search_folder_columns:
+            column.set_margin_start(offset)
+            offset += column.get_width() or COLUMN_WIDTH
+        return GLib.SOURCE_REMOVE
 
     def _prepare_drag_uri(self, uri: str) -> str:
         """Materialize a Trash item before handing it to desktop DND.

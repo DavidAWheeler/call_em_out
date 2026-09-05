@@ -2810,7 +2810,7 @@ class MyComputerPreviewColumn(Gtk.Box):
         details_area.append(self._detail_lbl)
 
         if go_to_folder_uri:
-            go_to_folder = Gtk.Button(label=_("Go to Folder"))
+            go_to_folder = Gtk.Button(label=_("Go to Containing Folder"))
             go_to_folder.add_css_class("suggested-action")
             go_to_folder.connect("clicked", self._go_to_folder)
             details_area.append(go_to_folder)

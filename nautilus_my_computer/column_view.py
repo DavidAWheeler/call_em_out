@@ -580,6 +580,7 @@ class _ColumnViewHost:
         self.search_results.connect("row-selected", self._on_search_result_selected)
         result_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         result_column.set_size_request(COLUMN_WIDTH, -1)
+        result_column.set_hexpand(False)
         result_column.set_halign(Gtk.Align.START)
         result_column.set_valign(Gtk.Align.FILL)
         result_column.set_vexpand(True)
@@ -707,6 +708,9 @@ class _ColumnViewHost:
             found = []
             if self._root_uri.startswith("computer:"):
                 roots = [
+                    # `/` is the local filesystem tree; Home and /mnt are
+                    # retained as useful fast roots for common local mounts.
+                    Gio.File.new_for_path("/"),
                     Gio.File.new_for_path(os.path.expanduser("~")),
                     Gio.File.new_for_path("/mnt"),
                 ]
@@ -2050,6 +2054,11 @@ class _ColumnViewHost:
             self.aligner.set_content(None)
 
     def sync_to_uri(self, new_uri: str) -> None:
+        # A sidebar/path-bar/history location change supersedes a visible
+        # search. Without this, the search overlay survived a Computer click
+        # and trapped the user until they returned to its original root.
+        if self.search_toggle.get_active() and new_uri.rstrip("/") != self._root_uri.rstrip("/"):
+            self.search_toggle.set_active(False)
         """Reconcile the Miller chain with Nautilus's real location -- called
         when it changes while Column View is already showing (address bar,
         pathbar, back/forward, a bookmark, the sidebar; see
@@ -2600,7 +2609,7 @@ class _ColumnViewHost:
         if old is not None:
             old.destroy_enumeration()
         go_to_folder = None
-        if search_result and file_uri:
+        if (search_result or self._root_uri.startswith("recent:")) and file_uri:
             parent = Gio.File.new_for_uri(file_uri).get_parent()
             go_to_folder = parent.get_uri() if parent is not None else None
         self.preview_column = MyComputerPreviewColumn(

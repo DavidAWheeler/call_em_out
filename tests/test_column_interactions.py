@@ -30,6 +30,32 @@ class ColumnInteractions(unittest.TestCase):
     def selected(self):
         return [item.display_name for item in self.column.selected_items()]
 
+    def test_search_result_uses_real_uri_and_normal_multiselection(self):
+        self.column.set_search_results([
+            ("first", "file:///tmp/one/first", False),
+            ("folder", "file:///tmp/two/folder", True),
+        ])
+        self.column.select_index(0)
+        self.column.select_for_pointer(1, ctrl=True)
+        self.assertEqual([i.uri for i in self.column.selected_items()],
+                         ["file:///tmp/one/first", "file:///tmp/two/folder"])
+
+    def test_recent_alias_resolves_to_underlying_file(self):
+        self.column.folder_uri = "recent:///"
+        self.column._ext = SimpleNamespace(_nautilus_prefs=SimpleNamespace(
+            hidden_files=lambda: False, sort_directories_first=lambda: False))
+        info = Gio.FileInfo()
+        info.set_name("opaque-recent-id")
+        info.set_display_name("report.txt")
+        info.set_file_type(Gio.FileType.REGULAR)
+        info.set_icon(Gio.ThemedIcon.new("text-x-generic"))
+        info.set_content_type("text/plain")
+        info.set_attribute_string("standard::target-uri", "file:///tmp/reports/report.txt")
+        self.column._populate_rows([info], {})
+        self.column.select_index(0)
+        self.assertEqual(self.column.selected_item().uri, "file:///tmp/reports/report.txt")
+        self.column.destroy_enumeration()
+
     def test_control_click_adds_and_removes_without_clearing_others(self):
         self.column.select_index(0)
         self.column.select_for_pointer(3, ctrl=True)

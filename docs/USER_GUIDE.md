@@ -35,6 +35,12 @@ results keep the result trail visible and open their contents in adjacent
 columns; file results show a preview with **Go to Containing Folder**. Changing
 location with a bookmark, path bar, or history control closes search cleanly.
 
+Search uses the same rows, selection model, resizable columns, and horizontal
+scrolling as folder browsing. A preview follows the last folder column;
+it does not cover the results or their children. **Go to Containing Folder**
+opens the directory and selects the file. The same button works in Recent,
+whose entries resolve to their actual file locations.
+
 The original project remains the reference for installation, upstream behavior, translations, and general architecture. Native Grid and List views remain the fallback when a behavior is not yet reliable in this fork.
 
 ## Shortcuts and interaction

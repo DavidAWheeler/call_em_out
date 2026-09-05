@@ -15,6 +15,10 @@ Open Files again. The installer puts the extension in your user data directory; 
 
 ## What's working
 
+- Search results, nested folders, and previews share the ordinary column
+  layout: drill right, keep the parent trail, and preview after the last folder.
+- **Go to Containing Folder** opens the real directory and selects the file
+  from either Search or Recent.
 - More dependable Ctrl/Shift multi-selection, including selection that survives refreshes.
 - Multi-file drag and drop: local moves by default, remote/NAS transfers copy,
   Ctrl copies, and Shift moves.

@@ -575,37 +575,9 @@ class _ColumnViewHost:
         self.search_entry.set_visible(False)
         search_bar.append(self.search_toggle)
         search_bar.append(self.search_entry)
-        self.search_results = Gtk.ListBox()
-        self.search_results.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self.search_results.connect("row-selected", self._on_search_result_selected)
-        result_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        result_column.set_size_request(COLUMN_WIDTH, -1)
-        result_column.set_hexpand(False)
-        result_column.set_halign(Gtk.Align.START)
-        result_column.set_valign(Gtk.Align.FILL)
-        result_column.set_vexpand(True)
-        result_column.add_css_class("mc-column")
-        result_column.add_css_class("mc-search-results")
-        result_heading = Gtk.Label(label=_("Search results"), xalign=0.0)
-        result_heading.set_tooltip_text(_("Results matching the current search"))
-        result_heading.add_css_class("heading")
-        result_heading.set_margin_start(12)
-        result_heading.set_margin_end(12)
-        result_heading.set_margin_top(10)
-        result_heading.set_margin_bottom(10)
-        result_heading.set_size_request(-1, 42)
-        result_column.append(result_heading)
-        result_scroller = Gtk.ScrolledWindow()
-        result_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        result_scroller.set_vexpand(True)
-        result_scroller.set_child(self.search_results)
-        result_column.append(result_scroller)
-        self.search_result_column = result_column
-        self._search_folder_columns: list[Gtk.Widget] = []
-        result_column.set_visible(False)
+        self.search_result_column = None
+        self._search_origin_uri = root_uri
         self.search_overlay.add_overlay(search_bar)
-        self.search_overlay.add_overlay(result_column)
-        self.search_results.connect("row-activated", self._on_search_result_activated)
         self.search_toggle.connect("toggled", self._on_search_toggled)
         self.search_entry.connect("search-changed", self._on_search_changed)
         self.search_entry.connect("activate", self._on_search_activate)
@@ -653,12 +625,15 @@ class _ColumnViewHost:
         if location_widget is not None:
             location_widget.set_visible(not enabled)
         if enabled:
+            self._search_origin_uri = self._root_uri
             self.search_entry.grab_focus()
             GLib.idle_add(self._disable_native_search_surface)
         else:
-            self._clear_search_folder_columns()
+            self._search_generation = getattr(self, "_search_generation", 0) + 1
             self.search_entry.set_text("")
-            self.search_result_column.set_visible(False)
+            if self.search_result_column is not None:
+                self.search_result_column = None
+                self.reset(self._search_origin_uri)
 
     def _native_header_surfaces(self) -> list[Gtk.Widget]:
         surfaces = []
@@ -689,20 +664,23 @@ class _ColumnViewHost:
 
     def _on_search_changed(self, entry) -> None:
         query = entry.get_text().strip().casefold()
-        if not query:
-            self.search_result_column.set_visible(False)
+        if not query or not self.search_toggle.get_active():
             return
-        self.search_result_column.set_visible(True)
+        self._cancel_row_commit()
+        self._detach_root()
+        for column in self.columns:
+            column.destroy_enumeration()
+        self.search_result_column = self._make_real_column("column-search:///")
+        self.search_result_column.set_tooltip_text(_("Search results"))
+        self.columns = [self.search_result_column]
+        self.focused_index = 0
+        self._set_preview(None)
+        self._reset_viewport_width()
+        self._rebuild_chain()
         self._search_generation = getattr(self, "_search_generation", 0) + 1
         generation = self._search_generation
-        child = self.search_results.get_first_child()
-        while child:
-            nxt = child.get_next_sibling()
-            self.search_results.remove(child)
-            child = nxt
-        pending = Gtk.ListBoxRow()
-        pending.set_child(Gtk.Label(label=_("Searching…"), xalign=0.0))
-        self.search_results.append(pending)
+        self.search_result_column._empty_page.set_title(_("Searching…"))
+        self.search_result_column._show_empty_page(True)
 
         def worker():
             found = []
@@ -751,61 +729,19 @@ class _ColumnViewHost:
     def _finish_search(self, generation, found) -> bool:
         if generation != getattr(self, "_search_generation", 0):
             return GLib.SOURCE_REMOVE
-        child = self.search_results.get_first_child()
-        while child:
-            nxt = child.get_next_sibling()
-            self.search_results.remove(child)
-            child = nxt
-        if not found:
-            row = Gtk.ListBoxRow()
-            row.set_child(Gtk.Label(label=_("No results"), xalign=0.0))
-            self.search_results.append(row)
-        else:
-            for name, uri, is_dir in found:
-                row = Gtk.ListBoxRow()
-                content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-                content.set_margin_start(10)
-                content.set_margin_end(10)
-                content.set_margin_top(6)
-                content.set_margin_bottom(6)
-                content.append(
-                    Gtk.Image.new_from_icon_name(
-                        "folder-symbolic" if is_dir else "text-x-generic-symbolic"
-                    )
-                )
-                content.append(Gtk.Label(label=name, xalign=0.0, hexpand=True))
-                if is_dir:
-                    content.append(Gtk.Image.new_from_icon_name("go-next-symbolic"))
-                row.set_child(content)
-                row._search_uri = uri
-                row._search_is_dir = is_dir
-                self.search_results.append(row)
+        if self.search_result_column is not None:
+            self.search_result_column.set_search_results(found)
         return GLib.SOURCE_REMOVE
-
-    def _on_search_result_selected(self, _list, row) -> None:
-        uri = getattr(row, "_search_uri", None) if row is not None else None
-        if uri and not getattr(row, "_search_is_dir", False):
-            self._set_preview(uri, search_result=True)
-            self._rebuild_chain()
-
-    def _on_search_result_activated(self, _list, row) -> None:
-        uri = getattr(row, "_search_uri", None)
-        if uri and getattr(row, "_search_is_dir", False):
-            # Search folders behave like a Miller alias: keep the result
-            # column in place and reveal its real contents directly beside
-            # it instead of handing the location to Nautilus and teleporting
-            # the entire view.
-            self._show_search_folder(uri)
-        elif uri:
-            self._set_preview(uri, search_result=True)
-            self._rebuild_chain()
 
     def _on_search_activate(self, _entry) -> None:
         # Enter commits the query but does not activate the first result.
-        self.search_results.grab_focus()
+        if self.search_result_column is not None:
+            self.search_result_column.grab_list_focus()
 
     def reset(self, root_uri: str) -> None:
         self._detach_root()
+        for column in self.columns:
+            column.destroy_enumeration()
         # Nothing from the old chain may commit into, or echo into, the new
         # one -- reset() re-roots to a genuinely different location.
         self._cancel_row_commit()
@@ -877,62 +813,6 @@ class _ColumnViewHost:
         column._finish_drag = self._finish_drag
         column._perform_drop = self._perform_drop_to
         return column
-
-    def _clear_search_folder_columns(self) -> None:
-        for column in self._search_folder_columns:
-            self.search_overlay.remove_overlay(column)
-            column.destroy_enumeration()
-        self._search_folder_columns.clear()
-
-    def _show_search_folder(self, uri: str) -> None:
-        target = Gio.File.new_for_uri(uri)
-        parent = target.get_parent()
-        # A result starts the branch. A child result preserves every already
-        # visible ancestor, while a sibling discards only columns to its
-        # right. This is the same "keep the trail" rule as Miller browsing.
-        parent_index = next(
-            (
-                index
-                for index, existing in enumerate(self._search_folder_columns)
-                if parent is not None and Gio.File.new_for_uri(existing.folder_uri).equal(parent)
-            ),
-            None,
-        )
-        if parent_index is None:
-            self._clear_search_folder_columns()
-        else:
-            stale = self._search_folder_columns[parent_index + 1 :]
-            for existing in stale:
-                self.search_overlay.remove_overlay(existing)
-                existing.destroy_enumeration()
-            del self._search_folder_columns[parent_index + 1 :]
-
-        def activate(column, row) -> None:
-            if row.is_dir:
-                self._show_search_folder(row.uri)
-            else:
-                self._set_preview(row.uri, search_result=True)
-                self._rebuild_chain()
-
-        column = self._make_real_column(uri, on_row_activated=activate)
-        column.set_halign(Gtk.Align.START)
-        column.set_valign(Gtk.Align.FILL)
-        column.set_vexpand(True)
-        self.search_overlay.add_overlay(column)
-        self._search_folder_columns.append(column)
-        # Gtk's measured result width can temporarily exceed its requested
-        # Miller width while long names settle. Position from the *rendered*
-        # result edge, never a guessed constant, so child columns cannot
-        # overlap or appear in the middle of the result list.
-        GLib.idle_add(self._position_search_folder_columns)
-        column.grab_list_focus()
-
-    def _position_search_folder_columns(self) -> bool:
-        offset = self.search_result_column.get_width() or COLUMN_WIDTH
-        for column in self._search_folder_columns:
-            column.set_margin_start(offset)
-            offset += column.get_width() or COLUMN_WIDTH
-        return GLib.SOURCE_REMOVE
 
     def _prepare_drag_uri(self, uri: str) -> str:
         """Materialize a Trash item before handing it to desktop DND.
@@ -1024,6 +904,8 @@ class _ColumnViewHost:
         return _ColumnViewHost._perform_drop_to(self, value, destination_uri, action)
 
     def _perform_drop_to(self, value, destination_uri: str, action) -> bool:
+        if destination_uri.startswith(("column-search:", "recent:")):
+            return False
         files = [f for f in value.get_files() if f.get_uri()]
         destination = Gio.File.new_for_uri(destination_uri)
         if not files or any(destination.equal(f) or destination.has_prefix(f) for f in files):
@@ -1124,6 +1006,11 @@ class _ColumnViewHost:
         self._set_cut_rows()
 
         if self._pending_child_focus is not column:
+            reveal_uri = getattr(self, "_pending_reveal_uri", None)
+            if reveal_uri and column is self.columns[-1]:
+                column.select_child_for_uri(reveal_uri)
+                column.with_selected_row(lambda row: None)
+                self._pending_reveal_uri = None
             return
         self._pending_child_focus = None
         if column not in self.columns:
@@ -2049,6 +1936,8 @@ class _ColumnViewHost:
         re-enumerates the folder asynchronously. The covered native view stays
         alive while Column View is active so returning to Grid/List restores
         Nautilus's own slot state without a forced reload."""
+        if getattr(self, "search_result_column", None) is not None:
+            return
         if restore_keyboard_focus:
             self._pending_focus_uri = uri
         try:
@@ -2620,12 +2509,29 @@ class _ColumnViewHost:
         if old is not None:
             old.destroy_enumeration()
         go_to_folder = None
-        if (search_result or self._root_uri.startswith("recent:")) and file_uri:
+        is_result = (
+            search_result
+            or getattr(self, "search_result_column", None) is not None
+            or self._root_uri.startswith("recent:")
+        )
+        if is_result and file_uri:
             parent = Gio.File.new_for_uri(file_uri).get_parent()
             go_to_folder = parent.get_uri() if parent is not None else None
         self.preview_column = MyComputerPreviewColumn(
             self._ext, file_uri, go_to_folder_uri=go_to_folder
         )
+        if go_to_folder:
+            self.preview_column._containing_folder_callback = functools.partial(
+                self._open_containing_folder, file_uri, go_to_folder
+            )
+
+    def _open_containing_folder(self, file_uri: str, folder_uri: str) -> None:
+        if self.search_toggle.get_active():
+            self.search_toggle.set_active(False)
+        self.reset(folder_uri)
+        self._pending_reveal_uri = file_uri
+        self._sync_slot_location(folder_uri)
+        self._align_to_viewport_pos(self.columns[0], 24)
 
     def _rebuild_chain(self) -> None:
         old_root = getattr(self, "root", None)
@@ -2685,6 +2591,8 @@ class _ColumnViewHost:
         widget.set_end_child(None)
         if isinstance(start_child, Gtk.Paned):
             self._detach_paned_children(start_child)
+        elif getattr(start_child, "_mc_header_column", None) is not None:
+            start_child.remove(start_child._mc_header_column)
         if isinstance(end_child, Gtk.Paned):
             self._detach_paned_children(end_child)
 
@@ -2700,7 +2608,19 @@ class _ColumnViewHost:
         paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         paned.set_vexpand(True)
         paned.set_valign(Gtk.Align.FILL)
-        paned.set_start_child(column)
+        if column is getattr(self, "search_result_column", None):
+            wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            heading = Gtk.Label(label=_("Search results"), xalign=0)
+            heading.add_css_class("heading")
+            heading.set_margin_start(12)
+            heading.set_margin_top(12)
+            heading.set_margin_bottom(12)
+            wrapper.append(heading)
+            wrapper.append(column)
+            wrapper._mc_header_column = column
+            paned.set_start_child(wrapper)
+        else:
+            paned.set_start_child(column)
         paned.set_end_child(tail)
         # The start child is always a fixed-width folder column -- it must
         # never auto-grow when the paned itself is reallocated bigger. All

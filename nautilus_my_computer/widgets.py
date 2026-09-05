@@ -2001,6 +2001,10 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         """Re-enumerate this column's own folder in place (e.g. after the
         hidden-files setting changes), without touching sibling columns or
         collapsing the Miller chain."""
+        # Search results are supplied by the search worker, not a GVfs
+        # directory. Global settings refresh must not erase that model.
+        if self.folder_uri.startswith("column-search:"):
+            return
         if self._loaded or self._store.get_n_items():
             cursor = self.selected_item()
             anchor = (
@@ -2024,12 +2028,14 @@ class MyComputerColumn(Gtk.ScrolledWindow):
 
     def _load(self) -> None:
         self._load_generation += 1
+        if self.folder_uri.startswith("column-search:"):
+            return
         generation = self._load_generation
         gfile = Gio.File.new_for_uri(self.folder_uri)
         gfile.enumerate_children_async(
             "standard::name,standard::display-name,standard::icon,"
             "standard::is-hidden,standard::is-backup,standard::type,standard::content-type,"
-            "standard::size,time::modified,time::created,time::access,"
+            "standard::size,standard::target-uri,time::modified,time::created,time::access,"
             "metadata::custom-icon,metadata::custom-icon-name",
             Gio.FileQueryInfoFlags.NONE,
             GLib.PRIORITY_DEFAULT,
@@ -2233,9 +2239,10 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         )
 
         base = Gio.File.new_for_uri(self.folder_uri)
+        targets = {info.get_name(): info.get_attribute_string("standard::target-uri") for info in infos}
         items = [
             _ColumnRowItem(
-                base.get_child(entry.name).get_uri(),
+                targets.get(entry.name) or base.get_child(entry.name).get_uri(),
                 entry.display_name,
                 entry.is_dir,
                 entry.icon,
@@ -2267,6 +2274,18 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         if callable(self._on_loaded):
             self._on_loaded(self)
         self._selection_restore = None
+
+    def set_search_results(self, results) -> None:
+        """Use the ordinary selection, drag, keyboard and row model for results."""
+        items = [_ColumnRowItem(uri, name, is_dir,
+                 Gio.ThemedIcon.new("folder-symbolic" if is_dir else "text-x-generic-symbolic"))
+                 for name, uri, is_dir in results]
+        self._store.splice(0, self._store.get_n_items(), items)
+        self._empty_page.set_title(_("No results"))
+        self._show_empty_page(not items)
+        self._loaded = True
+        self._cursor_index = None
+        self._selection_anchor = None
 
     def _on_content_changed(self, _monitor, _file, _other, _event):
         if self._content_refresh_id:
@@ -2941,6 +2960,10 @@ class MyComputerPreviewColumn(Gtk.Box):
             self._ext._restore_trash_uri(self.file_uri)
 
     def _go_to_folder(self, _button) -> None:
+        callback = getattr(self, "_containing_folder_callback", None)
+        if callback is not None:
+            callback()
+            return
         if self._go_to_folder_uri:
             self._ext._navigate_current_in_place(self._go_to_folder_uri, self.get_root())
 

@@ -539,6 +539,18 @@ _CSS = b"""
 .mc-preview-image {
     border-radius: 12px;
 }
+button.mc-trash-restore.suggested-action {
+    background-color: #26834a;
+    background-image: none;
+    color: white;
+}
+button.mc-trash-restore.suggested-action:hover {
+    background-color: #2f9958;
+    background-image: none;
+}
+.mc-search-results {
+    background-color: @view_bg_color;
+}
 /* Column View row thumbnail: rounded corners. The Gtk.Picture sets
    overflow:hidden so this radius clips the COVER-cropped square texture. */
 .mc-row-thumbnail {

@@ -826,6 +826,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         win.connect("destroy", self._on_window_destroyed)
         GLib.idle_add(self._remove_redundant_header_search, win)
         GLib.idle_add(self._move_search_toggle_left, win)
+        GLib.idle_add(self._move_main_menu_right, win)
         if _is_file_chooser_window(win):
             # No window-level "locations-changed" on this class — watch the
             # slot's own "location" property directly (same ground truth
@@ -2130,7 +2131,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         controls. Both groups are Gtk.Box children, so the same live button
         can be moved without duplicating its action or state.
         """
-        search = next(
+        native_search = next(
             (
                 w
                 for w in _all_widgets(win)
@@ -2152,9 +2153,15 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             ),
             None,
         )
-        if search is None or forward is None:
+        slot = self._active_slot_widget(win)
+        view = getattr(slot, "_mc_column_view", None) if slot is not None else None
+        host = getattr(view, "_mc_column_host", None) if view is not None else None
+        search = getattr(host, "search_toggle", None)
+        search_entry = getattr(host, "search_entry", None)
+        if native_search is None or search is None or search_entry is None or forward is None:
             GLib.timeout_add(100, self._move_search_toggle_left, win)
             return GLib.SOURCE_REMOVE
+        native_search.set_visible(False)
         old_parent = search.get_parent()
         nav_group = forward
         while nav_group is not None and type(nav_group).__name__ != "NautilusHistoryControls":
@@ -2163,16 +2170,79 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             nav_group = nav_group.get_parent()
         new_parent = nav_group.get_parent() if nav_group is not None else None
         if isinstance(old_parent, (Gtk.Box, Gtk.Stack)) and isinstance(new_parent, Gtk.Box):
+            location_widget = None
+            sibling = nav_group.get_next_sibling()
+            while sibling is not None:
+                if any(
+                    isinstance(child, Gtk.Button)
+                    and hasattr(child, "get_action_name")
+                    and child.get_action_name() == "toolbar.edit-location"
+                    for child in _all_widgets(sibling)
+                ):
+                    location_widget = sibling
+                    break
+                sibling = sibling.get_next_sibling()
             old_parent.remove(search)
             # Insert between the complete Back/Forward control and the
             # location/search input, so it participates in toolbar sizing.
-            search.set_margin_start(40)
+            search.set_margin_start(6)
+            search.set_visible(True)
             new_parent.insert_child_after(search, nav_group)
+            entry_parent = search_entry.get_parent()
+            if isinstance(entry_parent, (Gtk.Box, Gtk.Stack)):
+                entry_parent.remove(search_entry)
+            search_entry.set_hexpand(True)
+            search_entry.set_max_width_chars(54)
+            new_parent.insert_child_after(search_entry, search)
+            host._header_location_widget = location_widget
         else:
             _log(
                 "search toggle parents unsupported: "
                 f"{type(old_parent).__name__} -> {type(new_parent).__name__}"
             )
+        return GLib.SOURCE_REMOVE
+
+    def _move_main_menu_right(self, win: Gtk.Window) -> bool:
+        """Move Nautilus's existing hamburger beside the window controls."""
+        menu = next(
+            (
+                w
+                for w in _all_widgets(win)
+                if isinstance(w, Gtk.MenuButton)
+                and w.get_icon_name() == "open-menu-symbolic"
+                and w.get_mapped()
+            ),
+            None,
+        )
+        controls = next(
+            (w for w in _all_widgets(win) if type(w).__name__ == "GtkWindowControls"),
+            None,
+        )
+        if controls is None:
+            controls = next(
+                (w for w in _all_widgets(win) if type(w).__name__ == "WindowControls"), None
+            )
+        target = controls.get_parent() if controls is not None else None
+        if menu is None or not isinstance(target, Gtk.Box):
+            _log(
+                "main menu move waiting: "
+                f"menu={type(menu).__name__ if menu else None} "
+                f"controls={type(controls).__name__ if controls else None} "
+                f"target={type(target).__name__ if target else None}"
+            )
+            GLib.timeout_add(100, self._move_main_menu_right, win)
+            return GLib.SOURCE_REMOVE
+        old_parent = menu.get_parent()
+        if old_parent is target:
+            return GLib.SOURCE_REMOVE
+        if isinstance(old_parent, (Gtk.Box, Gtk.Stack)):
+            old_parent.remove(menu)
+            menu.set_margin_start(6)
+            menu.set_margin_end(6)
+            target.insert_child_after(menu, controls.get_prev_sibling())
+            _log("main menu moved beside window controls")
+        else:
+            _log(f"main menu parent unsupported: {type(old_parent).__name__}")
         return GLib.SOURCE_REMOVE
 
     def _navigate_current_in_place(self, uri: str, win: Gtk.Window) -> bool:

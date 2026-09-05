@@ -476,6 +476,7 @@ class MyComputerFolderCard(Gtk.Widget):
 
     def _wire_drag(self) -> None:
         drag = Gtk.DragSource()
+        self._drag_source = drag
         drag.set_actions(Gdk.DragAction.MOVE)
         # CAPTURE, matching nautilus-list-base.c:1373 -- runs ahead of the
         # BUBBLE-phase click gesture above so a drag on primary press isn't
@@ -1259,12 +1260,16 @@ class MyComputerColumnRow(Gtk.Box):
         # CAPTURE lets the drag source win over the row click gesture once the
         # pointer crosses GTK's drag threshold.
         drag = Gtk.DragSource()
-        drag.set_actions(Gdk.DragAction.COPY | Gdk.DragAction.MOVE | Gdk.DragAction.LINK)
+        self._drag_source = drag
+        # Offering LINK makes Plasma turn an ordinary file drag into an
+        # action chooser. Nautilus file rows use copy/move negotiation.
+        drag.set_actions(Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
         drag.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         drag.connect("prepare", self._on_drag_prepare)
+        drag.connect("drag-end", self._on_drag_end)
         self.add_controller(drag)
 
-    def _on_drag_prepare(self, _source, _x: float, _y: float):
+    def _on_drag_prepare(self, source, _x: float, _y: float):
         if self.item is None:
             return None
         _log(f"drag prepare uri={self.item.uri!r}")
@@ -1275,8 +1280,17 @@ class MyComputerColumnRow(Gtk.Box):
         items = column.selected_items() if column is not None else []
         if not any(item.uri == self.item.uri for item in items):
             items = [self.item]
+        if source is not None:
+            source.set_actions(
+                Gdk.DragAction.MOVE
+                if any(item.uri.startswith("trash:") for item in items)
+                else Gdk.DragAction.COPY | Gdk.DragAction.MOVE
+            )
         prepare_uri = getattr(column, "_prepare_drag_uri", None) if column is not None else None
         uris = [prepare_uri(item.uri) if prepare_uri is not None else item.uri for item in items]
+        uris = [uri for uri in uris if uri]
+        if not uris:
+            return None
         file_list = Gdk.FileList.new_from_list([Gio.File.new_for_uri(uri) for uri in uris])
         # Gdk.FileList leaves action negotiation to the destination, so
         # Nautilus can honor its normal copy/move/link modifier behavior.
@@ -1284,6 +1298,12 @@ class MyComputerColumnRow(Gtk.Box):
         value.init(Gdk.FileList)
         value.set_boxed(file_list)
         return Gdk.ContentProvider.new_for_value(value)
+
+    def _on_drag_end(self, _source, _drag, delete_data: bool) -> None:
+        column = getattr(self, "_column", None)
+        finish = getattr(column, "_finish_drag", None) if column is not None else None
+        if finish is not None:
+            finish(bool(delete_data))
 
     @property
     def uri(self) -> str | None:
@@ -1311,6 +1331,11 @@ class MyComputerColumnRow(Gtk.Box):
         """
         self._mc_pointer_selection_only = False
         self.item = item
+        self._drag_source.set_actions(
+            Gdk.DragAction.MOVE
+            if item.uri.startswith("trash:")
+            else Gdk.DragAction.COPY | Gdk.DragAction.MOVE
+        )
         self._name_lbl.set_label(item.display_name)
         self._chevron.set_visible(item.is_dir)
 
@@ -1775,6 +1800,7 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         self._cursor_index: int | None = None
         self._selection_anchor: int | None = None
         self._selection_restore = None
+        self._load_generation = 0
         self._row_widgets: dict[int, MyComputerColumnRow] = {}
 
         factory = Gtk.SignalListItemFactory()
@@ -1903,13 +1929,14 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         return GLib.SOURCE_REMOVE
 
     def _on_row_drop(self, target, value, _x, _y, row):
-        self._cancel_drop_hover()
         action = self._on_row_drop_motion(target, _x, _y, row)
+        self._cancel_drop_hover()
         if action == 0:
             return False
-        # Let the owning Column View drop target perform the actual transfer;
-        # this target exists to provide folder hover navigation only.
-        return False
+        perform = getattr(self, "_perform_drop", None)
+        if perform is None or row.item is None or not row.is_dir:
+            return False
+        return bool(perform(value, row.uri, action))
 
     def _on_row_widget_pressed(
         self,
@@ -1996,6 +2023,8 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         self._load()
 
     def _load(self) -> None:
+        self._load_generation += 1
+        generation = self._load_generation
         gfile = Gio.File.new_for_uri(self.folder_uri)
         gfile.enumerate_children_async(
             "standard::name,standard::display-name,standard::icon,"
@@ -2005,21 +2034,32 @@ class MyComputerColumn(Gtk.ScrolledWindow):
             Gio.FileQueryInfoFlags.NONE,
             GLib.PRIORITY_DEFAULT,
             self._cancellable,
-            self._on_enumerator_ready,
+            lambda source, result: self._on_enumerator_ready(source, result, generation),
         )
 
-    def _on_enumerator_ready(self, gfile: Gio.File, result: Gio.AsyncResult) -> None:
+    def _on_enumerator_ready(
+        self, gfile: Gio.File, result: Gio.AsyncResult, generation: int
+    ) -> None:
+        if generation != self._load_generation:
+            return
         try:
             enumerator = gfile.enumerate_children_finish(result)
         except GLib.Error:
             return
         enumerator.next_files_async(
-            200, GLib.PRIORITY_DEFAULT, self._cancellable, self._on_next_files_ready, []
+            200,
+            GLib.PRIORITY_DEFAULT,
+            self._cancellable,
+            self._on_next_files_ready,
+            (generation, []),
         )
 
     def _on_next_files_ready(
-        self, enumerator: Gio.FileEnumerator, result: Gio.AsyncResult, collected: list
+        self, enumerator: Gio.FileEnumerator, result: Gio.AsyncResult, state: tuple
     ) -> None:
+        generation, collected = state
+        if generation != self._load_generation:
+            return
         try:
             infos = enumerator.next_files_finish(result)
         except GLib.Error:
@@ -2027,12 +2067,18 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         if infos:
             collected.extend(infos)
             enumerator.next_files_async(
-                200, GLib.PRIORITY_DEFAULT, self._cancellable, self._on_next_files_ready, collected
+                200,
+                GLib.PRIORITY_DEFAULT,
+                self._cancellable,
+                self._on_next_files_ready,
+                (generation, collected),
             )
             return
-        self._maybe_count_dirs_then_populate(collected)
+        self._maybe_count_dirs_then_populate(collected, generation)
 
-    def _maybe_count_dirs_then_populate(self, infos: list) -> None:
+    def _maybe_count_dirs_then_populate(self, infos: list, generation: int) -> None:
+        if generation != self._load_generation:
+            return
         # Directory item counts are needed for sorting by size (native
         # Nautilus: a folder's "size" is its item count, never its on-disk
         # byte size -- see compare_by_size in nautilus-file.c). Always count
@@ -2041,7 +2087,7 @@ class MyComputerColumn(Gtk.ScrolledWindow):
             info.get_name() for info in infos if info.get_file_type() == Gio.FileType.DIRECTORY
         ]
         if not dir_names:
-            self._populate_rows(infos, {})
+            self._populate_rows(infos, {}, generation)
             return
         dir_counts: dict[str, int] = {}
         pending = len(dir_names)
@@ -2050,7 +2096,7 @@ class MyComputerColumn(Gtk.ScrolledWindow):
             nonlocal pending
             pending -= 1
             if pending == 0:
-                self._populate_rows(infos, dir_counts)
+                self._populate_rows(infos, dir_counts, generation)
 
         base = Gio.File.new_for_uri(self.folder_uri)
         for name in dir_names:
@@ -2128,7 +2174,9 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         dir_counts[name] = running_count
         on_done()
 
-    def _populate_rows(self, infos: list, dir_counts: dict) -> None:
+    def _populate_rows(self, infos: list, dir_counts: dict, generation: int | None = None) -> None:
+        if generation is not None and generation != self._load_generation:
+            return
         show_hidden = self._ext._nautilus_prefs.hidden_files()
         entries = []
         for info in infos:
@@ -2198,8 +2246,7 @@ class MyComputerColumn(Gtk.ScrolledWindow):
             for entry in entries
         ]
         self._show_empty_page(not items)
-        if items:
-            self._store.splice(0, 0, items)
+        self._store.splice(0, self._store.get_n_items(), items)
 
         if self._selection_restore is not None:
             selected, cursor, anchor = self._selection_restore
@@ -2598,10 +2645,13 @@ class MyComputerPreviewColumn(Gtk.Box):
 
     __gtype_name__ = "MyComputerPreviewColumn"
 
-    def __init__(self, ext, file_uri: str | None) -> None:
+    def __init__(
+        self, ext, file_uri: str | None, *, go_to_folder_uri: str | None = None
+    ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self._ext = ext
         self.file_uri = file_uri
+        self._go_to_folder_uri = go_to_folder_uri
         self._cancellable = Gio.Cancellable()
         self._discoverer = None
         # Deferred single-click-policy activation, set on "pressed" and consumed on
@@ -2758,6 +2808,12 @@ class MyComputerPreviewColumn(Gtk.Box):
         self._detail_lbl.get_style_context().add_class("caption")
         details_area.append(self._detail_lbl)
 
+        if go_to_folder_uri:
+            go_to_folder = Gtk.Button(label=_("Go to Folder"))
+            go_to_folder.add_css_class("suggested-action")
+            go_to_folder.connect("clicked", self._go_to_folder)
+            details_area.append(go_to_folder)
+
         created_row, self._created_val = _make_kv_row(_native("Created"))
         details_area.append(created_row)
 
@@ -2771,13 +2827,21 @@ class MyComputerPreviewColumn(Gtk.Box):
         self._original_row.set_visible(False)
         details_area.append(self._original_row)
 
-        self._trash_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self._trash_actions = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self._trash_actions.set_halign(Gtk.Align.CENTER)
+        self._trash_actions.set_hexpand(True)
+        self._trash_actions.set_valign(Gtk.Align.CENTER)
         self._restore_button = Gtk.Button(label=_native("Restore"))
         self._delete_button = Gtk.Button(label=_native("Delete Permanently"))
+        self._restore_button.add_css_class("mc-trash-restore")
+        self._restore_button.add_css_class("suggested-action")
+        self._delete_button.add_css_class("destructive-action")
         self._restore_button.connect("clicked", self._restore_trash_item)
         self._delete_button.connect("clicked", self._delete_trash_item)
-        self._trash_actions.append(self._restore_button)
+        self._restore_button.set_hexpand(True)
+        self._delete_button.set_hexpand(True)
         self._trash_actions.append(self._delete_button)
+        self._trash_actions.append(self._restore_button)
         self._trash_actions.set_visible(False)
         details_area.append(self._trash_actions)
 
@@ -2874,6 +2938,10 @@ class MyComputerPreviewColumn(Gtk.Box):
     def _restore_trash_item(self, _button) -> None:
         if self.file_uri and hasattr(self._ext, "_restore_trash_uri"):
             self._ext._restore_trash_uri(self.file_uri)
+
+    def _go_to_folder(self, _button) -> None:
+        if self._go_to_folder_uri:
+            self._ext._navigate_current_in_place(self._go_to_folder_uri, self.get_root())
 
     def _delete_trash_item(self, _button) -> None:
         if self.file_uri and hasattr(self._ext, "_delete_trash_uri"):

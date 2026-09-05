@@ -4,7 +4,24 @@ This is like spicy My Computer for Nautilus: a respectful personal fork of [My C
 
 ## Current improvements
 
-Column View has model-backed Ctrl-click toggles, Shift-click and Shift-arrow ranges, Ctrl+A, multi-file drag sources, native copy/move/link negotiation, folder hover navigation, refresh-safe selection, group-aware Move to Trash, and a capped preview width. The extension continues to use Nautilus and GIO for file operations.
+Column View has model-backed Ctrl-click toggles, Shift-click and Shift-arrow
+ranges, Ctrl+A, multi-file drag sources, direct folder-row drops, folder hover
+navigation, refresh-safe selection, group-aware Move to Trash, and a capped
+preview width. Local drag and drop moves by default; Ctrl requests copy and
+Shift requests move. Explicitly remote and NAS-mounted transfers copy by
+default. The extension continues to use Nautilus and GIO for file operations.
+
+Trash opens in Column View. Selecting an item shows its modified date, Trash
+date, and original location, with red **Delete Permanently** and green
+**Restore** actions. Dragging out of Trash materializes a normal local file URI
+and moves the item to the drop destination, avoiding desktop-shell failures on
+raw `trash:///` URLs.
+
+The search button sits directly after Back and Forward. `Ctrl+F` opens or
+closes the same header field. Results appear as a live **Search results**
+column. Enter runs the typed query without opening the first match. Folder
+results navigate into that folder; file results show a preview with **Go to
+Folder**.
 
 The original project remains the reference for installation, upstream behavior, translations, and general architecture. Native Grid and List views remain the fallback when a behavior is not yet reliable in this fork.
 
@@ -12,13 +29,19 @@ The original project remains the reference for installation, upstream behavior, 
 
 `Ctrl+3` selects Column View. `Left` and `Right` move between columns; vertical arrows move within a column; `Shift` extends a range; `Ctrl+A` selects all; `Enter` opens the current item; `Backspace` requests the parent; `Ctrl+C`, `Ctrl+X`, and `Ctrl+V` copy, cut, and paste; `F2` renames; `Delete` moves the selected group to Trash.
 
-Dragging a selected group to a native folder uses the destination's normal action negotiation. Ctrl requests copy, Shift requests move, and Ctrl+Shift requests a link where supported. Hovering over a folder is intended to open that folder's next column after a short delay.
+Dragging a selected group onto a folder row transfers it directly; waiting on
+the row also opens the folder so deeper destinations can be chosen. Back moves
+the viewport left and leaves the deeper branch mounted off to the right, so
+Forward can slide back to it. Clicking a bookmark hard-resets stale horizontal
+scroll before loading the new location.
 
 ## Known limits
 
-Back-button viewport animation and native filesystem-search hand-off still
-need live Nautilus polish. Trash columns, preview metadata, and restore/delete
-actions are wired, but desktop drag-out may reject a raw `trash:///` URI. A
-Nautilus update can change the private widgets this extension integrates with.
+Search intentionally stops after four directory levels or 200 matches. A
+Trash drag is materialized when the drag begins, so cancelling a drag can leave
+the item in the extension's user cache rather than in Trash; successful drops
+move it to the requested destination. Link creation is not offered by Column
+View rows. A Nautilus update can change the private widgets this extension
+integrates with.
 
 See [FEATURE_MATRIX.md](FEATURE_MATRIX.md) for percentages, current behavior, known bugs, next work, and the intended finish line for each feature.

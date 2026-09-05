@@ -2,6 +2,7 @@
 
 import functools
 import os
+import tempfile
 import threading
 
 import gi
@@ -430,6 +431,7 @@ class _ColumnViewHost:
         self._clipboard = win.get_clipboard()
         self._clipboard.connect("changed", self._on_clipboard_changed)
         self._operation_monitors: list[Gio.FileMonitor] = []
+        self._trash_drag_staging: dict[str, str | None] = {}
         self._native_cut_observer = NativeCutStateObserver(win, self._apply_native_cut_uris)
         self._sort = get_column_view_sort(ext)
 
@@ -554,12 +556,17 @@ class _ColumnViewHost:
         self.search_overlay.set_hexpand(True)
         self.search_overlay.set_vexpand(True)
         self.search_overlay.set_child(scroller)
+        # This temporary box only owns the controls until main.py reparents
+        # them into Nautilus's real header, directly after Back/Forward.
         search_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        search_bar.set_margin_start(8)
-        search_bar.set_margin_top(8)
-        search_bar.set_halign(Gtk.Align.START)
-        search_bar.set_valign(Gtk.Align.START)
-        self.search_toggle = Gtk.ToggleButton(icon_name="system-search-symbolic")
+        search_bar.set_visible(False)
+        self._search_control_holder = search_bar
+        self.search_toggle = Gtk.ToggleButton()
+        search_icon = _bundled_gicon("search-folder-symbolic")
+        if search_icon is not None:
+            self.search_toggle.set_child(Gtk.Image.new_from_gicon(search_icon))
+        else:
+            self.search_toggle.set_icon_name("system-search-symbolic")
         self.search_toggle.set_tooltip_text(_("Search files"))
         self.search_toggle.set_visible(False)
         self.search_entry = Gtk.SearchEntry()
@@ -570,13 +577,32 @@ class _ColumnViewHost:
         search_bar.append(self.search_entry)
         self.search_results = Gtk.ListBox()
         self.search_results.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self.search_results.set_visible(False)
-        self.search_results.set_halign(Gtk.Align.START)
-        self.search_results.set_valign(Gtk.Align.START)
-        self.search_results.set_margin_top(52)
-        self.search_results.set_margin_start(8)
+        self.search_results.connect("row-selected", self._on_search_result_selected)
+        result_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        result_column.set_size_request(COLUMN_WIDTH, -1)
+        result_column.set_halign(Gtk.Align.START)
+        result_column.set_valign(Gtk.Align.FILL)
+        result_column.set_vexpand(True)
+        result_column.add_css_class("mc-column")
+        result_column.add_css_class("mc-search-results")
+        result_heading = Gtk.Label(label=_("Search results"), xalign=0.0)
+        result_heading.set_tooltip_text(_("Results matching the current search"))
+        result_heading.add_css_class("heading")
+        result_heading.set_margin_start(12)
+        result_heading.set_margin_end(12)
+        result_heading.set_margin_top(10)
+        result_heading.set_margin_bottom(10)
+        result_heading.set_size_request(-1, 42)
+        result_column.append(result_heading)
+        result_scroller = Gtk.ScrolledWindow()
+        result_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        result_scroller.set_vexpand(True)
+        result_scroller.set_child(self.search_results)
+        result_column.append(result_scroller)
+        self.search_result_column = result_column
+        result_column.set_visible(False)
         self.search_overlay.add_overlay(search_bar)
-        self.search_overlay.add_overlay(self.search_results)
+        self.search_overlay.add_overlay(result_column)
         self.search_results.connect("row-activated", self._on_search_result_activated)
         self.search_toggle.connect("toggled", self._on_search_toggled)
         self.search_entry.connect("search-changed", self._on_search_changed)
@@ -592,17 +618,78 @@ class _ColumnViewHost:
     def _on_search_toggled(self, button) -> None:
         enabled = button.get_active()
         self.search_entry.set_visible(enabled)
+        location_widget = getattr(self, "_header_location_widget", None)
+        location_widgets = getattr(self, "_header_location_widgets", [])
+        if enabled:
+            location_widgets = self._native_header_surfaces()
+            self._header_location_widgets = location_widgets
+        for widget in location_widgets:
+            widget.set_visible(not enabled)
+        header = self.search_entry.get_parent()
+        adjacent = self.search_entry.get_next_sibling()
+        if adjacent is not None:
+            location_widget = adjacent
+            self._header_location_widget = adjacent
+        edit_location = next(
+            (
+                widget
+                for widget in _all_widgets(self._win)
+                if isinstance(widget, Gtk.Button)
+                and hasattr(widget, "get_action_name")
+                and widget.get_action_name() == "toolbar.edit-location"
+                and widget.get_mapped()
+            ),
+            None,
+        )
+        if edit_location is not None and header is not None:
+            direct_child = edit_location
+            while direct_child.get_parent() is not None and direct_child.get_parent() is not header:
+                direct_child = direct_child.get_parent()
+            if direct_child.get_parent() is header:
+                location_widget = direct_child
+                self._header_location_widget = direct_child
+        if location_widget is not None:
+            location_widget.set_visible(not enabled)
         if enabled:
             self.search_entry.grab_focus()
+            GLib.idle_add(self._disable_native_search_surface)
         else:
             self.search_entry.set_text("")
-            self.search_results.set_visible(False)
+            self.search_result_column.set_visible(False)
+
+    def _native_header_surfaces(self) -> list[Gtk.Widget]:
+        surfaces = []
+        for widget in _all_widgets(self._win):
+            if type(widget).__name__ not in {
+                "NautilusPathBar",
+                "NautilusLocationEntry",
+                "NautilusQueryEditor",
+            }:
+                continue
+            surface = widget
+            while surface.get_parent() is not None and not isinstance(surface, Gtk.Stack):
+                surface = surface.get_parent()
+            if isinstance(surface, Gtk.Stack) and surface not in surfaces:
+                surfaces.append(surface)
+        return surfaces
+
+    def _disable_native_search_surface(self) -> bool:
+        query_editors = [
+            widget
+            for widget in _all_widgets(self._win)
+            if type(widget).__name__ == "NautilusQueryEditor" and widget.get_mapped()
+        ]
+        if query_editors:
+            for widget in query_editors:
+                widget.set_visible(False)
+        return GLib.SOURCE_REMOVE
 
     def _on_search_changed(self, entry) -> None:
         query = entry.get_text().strip().casefold()
         if not query:
-            self.search_results.set_visible(False)
+            self.search_result_column.set_visible(False)
             return
+        self.search_result_column.set_visible(True)
         self._search_generation = getattr(self, "_search_generation", 0) + 1
         generation = self._search_generation
         child = self.search_results.get_first_child()
@@ -616,7 +703,14 @@ class _ColumnViewHost:
 
         def worker():
             found = []
-            queue = [(Gio.File.new_for_uri(self._root_uri), 0)]
+            if self._root_uri.startswith("computer:"):
+                roots = [
+                    Gio.File.new_for_path(os.path.expanduser("~")),
+                    Gio.File.new_for_path("/mnt"),
+                ]
+            else:
+                roots = [Gio.File.new_for_uri(self._root_uri)]
+            queue = [(root, 0) for root in roots]
             while queue and len(found) < 200:
                 folder, depth = queue.pop(0)
                 try:
@@ -632,7 +726,13 @@ class _ColumnViewHost:
                         name = info.get_display_name() or info.get_name()
                         child_file = folder.get_child(info.get_name())
                         if query in name.casefold():
-                            found.append((name, child_file.get_uri()))
+                            found.append(
+                                (
+                                    name,
+                                    child_file.get_uri(),
+                                    info.get_file_type() == Gio.FileType.DIRECTORY,
+                                )
+                            )
                         if info.get_file_type() == Gio.FileType.DIRECTORY and depth < 4:
                             queue.append((child_file, depth + 1))
                     enum.close(None)
@@ -655,17 +755,41 @@ class _ColumnViewHost:
             row.set_child(Gtk.Label(label=_("No results"), xalign=0.0))
             self.search_results.append(row)
         else:
-            for name, uri in found:
+            for name, uri, is_dir in found:
                 row = Gtk.ListBoxRow()
-                row.set_child(Gtk.Label(label=name, xalign=0.0))
+                content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+                content.set_margin_start(10)
+                content.set_margin_end(10)
+                content.set_margin_top(6)
+                content.set_margin_bottom(6)
+                content.append(
+                    Gtk.Image.new_from_icon_name(
+                        "folder-symbolic" if is_dir else "text-x-generic-symbolic"
+                    )
+                )
+                content.append(Gtk.Label(label=name, xalign=0.0, hexpand=True))
+                if is_dir:
+                    content.append(Gtk.Image.new_from_icon_name("go-next-symbolic"))
+                row.set_child(content)
                 row._search_uri = uri
+                row._search_is_dir = is_dir
                 self.search_results.append(row)
         return GLib.SOURCE_REMOVE
 
+    def _on_search_result_selected(self, _list, row) -> None:
+        uri = getattr(row, "_search_uri", None) if row is not None else None
+        if uri and not getattr(row, "_search_is_dir", False):
+            self._set_preview(uri, search_result=True)
+            self._rebuild_chain()
+
     def _on_search_result_activated(self, _list, row) -> None:
         uri = getattr(row, "_search_uri", None)
-        if uri:
+        if uri and getattr(row, "_search_is_dir", False):
+            self.search_toggle.set_active(False)
             self._ext._navigate_current_in_place(uri, self._win)
+        elif uri:
+            self._set_preview(uri, search_result=True)
+            self._rebuild_chain()
 
     def _on_search_activate(self, _entry) -> None:
         # Enter commits the query but does not activate the first result.
@@ -700,8 +824,17 @@ class _ColumnViewHost:
         self._rebuild_chain()
 
     def _poll_viewport_size(self, _widget, _clock) -> bool:
+        if self.search_toggle.get_active():
+            for widget in self._native_header_surfaces():
+                widget.set_visible(False)
         size = (self.scroller.get_width(), self.scroller.get_height())
         if size != self._last_viewport_size:
+            old_width = self._last_viewport_size[0]
+            if old_width > 0 and size[0] > old_width:
+                adjustment = self.scroller.get_hadjustment()
+                adjustment.set_value(
+                    max(adjustment.get_lower(), adjustment.get_value() - (size[0] - old_width))
+                )
             self._last_viewport_size = size
             self._sync_root_width()
         return True
@@ -732,29 +865,57 @@ class _ColumnViewHost:
         column.add_controller(drop)
         column._on_files_dragged = lambda: self._watch_operation_directories([column.folder_uri])
         column._prepare_drag_uri = self._prepare_drag_uri
+        column._finish_drag = self._finish_drag
+        column._perform_drop = self._perform_drop_to
         return column
 
     def _prepare_drag_uri(self, uri: str) -> str:
         """Materialize a Trash item before handing it to desktop DND.
 
         Plasma and several other desktop targets reject ``trash:///`` in a
-        URI list. Restore the item to its recorded original path while the
-        drag starts, then export the ordinary file URI that every target
-        understands.
+        URI list. Move the item into a user-owned staging directory and
+        export that ordinary file URI. The destination then moves it exactly
+        where the pointer was released.
         """
         if not uri.startswith("trash:"):
             return uri
         source = Gio.File.new_for_uri(uri)
         try:
-            info = source.query_info("trash::orig-path", Gio.FileQueryInfoFlags.NONE, None)
+            info = source.query_info(
+                "standard::display-name,trash::orig-path", Gio.FileQueryInfoFlags.NONE, None
+            )
+            name = info.get_display_name() or source.get_basename() or "trashed-item"
             original = info.get_attribute_byte_string("trash::orig-path")
-            if original:
-                target = Gio.File.new_for_path(original)
-                source.move(target, Gio.FileCopyFlags.NONE, None, None)
-                return target.get_uri()
+            staging_root = os.path.join(GLib.get_user_cache_dir(), "call-em-out", "trash-drag")
+            os.makedirs(staging_root, mode=0o700, exist_ok=True)
+            staging_dir = tempfile.mkdtemp(prefix="drag-", dir=staging_root)
+            target = Gio.File.new_for_path(os.path.join(staging_dir, name))
+            source.move(target, Gio.FileCopyFlags.NONE, None, None)
+            self._trash_drag_staging[target.get_uri()] = original
+            return target.get_uri()
         except GLib.Error as error:
             _log(f"Could not prepare Trash drag {uri!r}: {error.message}")
-        return uri
+        return ""
+
+    def _finish_drag(self, destination_accepted_move: bool) -> None:
+        """Put staged Trash items back when a drag is cancelled."""
+        staged = self._trash_drag_staging
+        self._trash_drag_staging = {}
+        if destination_accepted_move:
+            return
+        for uri, original in staged.items():
+            file_obj = Gio.File.new_for_uri(uri)
+            if not file_obj.query_exists(None):
+                continue
+            try:
+                if original and not os.path.exists(original):
+                    restored = Gio.File.new_for_path(original)
+                    file_obj.move(restored, Gio.FileCopyFlags.NONE, None, None)
+                    restored.trash(None)
+                else:
+                    file_obj.trash(None)
+            except GLib.Error as error:
+                _log(f"Could not return cancelled Trash drag: {error.message}")
 
     def _on_column_drop_motion(self, target, _x: float, _y: float):
         current = target.get_current_drop()
@@ -769,7 +930,7 @@ class _ColumnViewHost:
             if ctrl and shift
             else Gdk.DragAction.MOVE
             if shift
-            else Gdk.DragAction.COPY
+            else Gdk.DragAction.MOVE
         )
         offered = current.get_actions() if current is not None else Gdk.DragAction(0)
         # Some backends already narrow the drop to the modifier-selected
@@ -795,7 +956,10 @@ class _ColumnViewHost:
                     destination_uri = picked.uri
                 break
             picked = picked.get_parent()
-        files = value.get_files()
+        return _ColumnViewHost._perform_drop_to(self, value, destination_uri, action)
+
+    def _perform_drop_to(self, value, destination_uri: str, action) -> bool:
+        files = [f for f in value.get_files() if f.get_uri()]
         destination = Gio.File.new_for_uri(destination_uri)
         if not files or any(destination.equal(f) or destination.has_prefix(f) for f in files):
             return False
@@ -803,6 +967,23 @@ class _ColumnViewHost:
         if trash_files:
             self._restore_trash_drag(trash_files, destination)
             return True
+        if destination_uri.startswith("trash:") and action == Gdk.DragAction.MOVE:
+            for source in files:
+                source.trash_async(GLib.PRIORITY_DEFAULT, None, None, None)
+            return True
+        # Ordinary local drags move. Explicitly remote URIs and the locally
+        # mounted NAS copy by default, matching file-manager convention for
+        # transfers across machines/filesystems.
+        destination_path = destination.get_path() or ""
+        if action == Gdk.DragAction.MOVE and (
+            destination.get_uri_scheme() != "file"
+            or destination_path.startswith("/mnt/nas/")
+            or any(
+                f.get_uri_scheme() != "file" or (f.get_path() or "").startswith("/mnt/nas/")
+                for f in files
+            )
+        ):
+            action = Gdk.DragAction.COPY
         self._paste_uris_into_folder(
             [f.get_uri() for f in files],
             destination_uri,
@@ -1891,8 +2072,6 @@ class _ColumnViewHost:
         # forward) -- any keyboard commit still waiting out its debounce
         # targets a column this is about to collapse or replace.
         self._cancel_row_commit()
-        self._defer_trim_columns(idx + 1)
-
         self._set_preview(None)
         # Keyboard nav treats the deepest remaining column as "current"
         # rather than its parent -- Left/Right walk columns directly, so the
@@ -2353,14 +2532,20 @@ class _ColumnViewHost:
         # time a file is clicked (see _set_preview).
         return MyComputerPreviewColumn(self._ext, None)
 
-    def _set_preview(self, file_uri: str | None) -> None:
+    def _set_preview(self, file_uri: str | None, *, search_result: bool = False) -> None:
         # The preview is rebuilt (never updated in place) on every navigation:
         # cancel the old one's async work and swap in a fresh widget. The old
         # widget is detached from the paned chain by the next _rebuild_chain.
         old = self.preview_column
         if old is not None:
             old.destroy_enumeration()
-        self.preview_column = MyComputerPreviewColumn(self._ext, file_uri)
+        go_to_folder = None
+        if search_result and file_uri:
+            parent = Gio.File.new_for_uri(file_uri).get_parent()
+            go_to_folder = parent.get_uri() if parent is not None else None
+        self.preview_column = MyComputerPreviewColumn(
+            self._ext, file_uri, go_to_folder_uri=go_to_folder
+        )
 
     def _rebuild_chain(self) -> None:
         old_root = getattr(self, "root", None)
@@ -2561,6 +2746,9 @@ class _ColumnViewHost:
         if self._scroll_animation is not None:
             self._scroll_animation.skip()
             self._scroll_animation = None
+        adjustment = self.scroller.get_hadjustment()
+        if adjustment is not None:
+            adjustment.set_value(adjustment.get_lower())
 
     def _sync_root_width(self) -> None:
         adj = self.scroller.get_hadjustment()
@@ -3329,7 +3517,7 @@ def inject_column_view_entry(ext, win: Gtk.Window) -> None:
     split_button._mc_column_attached = True
 
     options_btn = Gtk.MenuButton(
-        icon_name="view-more-symbolic", tooltip_text=_native("View Options")
+        icon_name="view-sort-ascending-symbolic", tooltip_text=_native("View Options")
     )
     options_btn.set_name("mc-view-options-button")
     options_btn.add_css_class("mc-view-options-button")

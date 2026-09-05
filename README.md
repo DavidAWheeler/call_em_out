@@ -5,13 +5,20 @@
 ## What this fork changes
 
 - More dependable Ctrl/Shift multi-selection, including selection that survives refreshes.
-- Multi-file drag and drop with native copy, move, and link modifiers.
-- Folder hover navigation while dragging.
+- Multi-file drag and drop: local moves by default, remote/NAS transfers copy,
+  Ctrl copies, and Shift moves.
+- Direct folder-row drops plus hover navigation into deeper folders.
 - Faster live refresh after file operations and external changes.
-- Group-aware Move to Trash and a capped preview width while resizing.
-- Small focus and viewport adjustments for the personal workflow.
+- A real Trash Column View with metadata, Restore, Delete Permanently, and
+  destination-aware drag-out.
+- Header search with live Column View results and file-result previews.
+- Sliding Back navigation, safer bookmark jumps, and resize behavior that
+  reveals hidden columns before stretching the preview.
 
-The fork does not replace Nautilus or claim to be a new file manager. It injects the existing Column View into Nautilus and keeps native Grid and List views available. Some behavior still depends on Nautilus internals and remains experimental.
+The fork does not replace Nautilus or claim to be a new file manager. It makes
+the original extension spicier for one personal workflow and keeps native Grid
+and List views available. The header integration depends on Nautilus internals
+and may need adjustment after Nautilus updates.
 
 Install and usage information is in [docs/USER_GUIDE.md](docs/USER_GUIDE.md). The detailed status is in [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md).
 

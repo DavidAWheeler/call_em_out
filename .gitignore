@@ -15,12 +15,12 @@ venv/
 __pycache__/
 *.pyc
 
-# Claude AI customization (personal workflow)
+# Personal workflow customization
 .claude/
 .claudeignore
 CLAUDE.md
 
-# Codex AI customization (personal workflow)
+# Additional personal workflow customization
 .codex/
 .codex-skills/
 AGENTS.md
@@ -44,3 +44,4 @@ build/
 
 # Local changelogs & notes
 .local-changelog.md
+HANDOFF.local.md

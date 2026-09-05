@@ -1510,8 +1510,7 @@ class _ColumnViewHost:
         """Push the Miller chain's new deepest folder to Nautilus's real slot
         location (see _on_slot_location_changed below for the reverse
         direction, sync_to_uri below). The "slot." prefix is required or the
-        action fails silently (see CLAUDE.md's fragility table / main.py's
-        existing tab-open callers).
+        action fails silently, matching main.py's existing tab-open callers.
 
         This navigates Nautilus's live-underneath native slot, which
         re-enumerates the folder asynchronously. The covered native view stays

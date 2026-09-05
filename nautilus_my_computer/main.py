@@ -101,7 +101,7 @@ EXT_LICENSE = "MIT"
 EXT_GITHUB = "https://github.com/yannmasoch/nautilus-my-computer"
 
 
-DISKS_URI = "computer:///"  # noqa: F811 -- intentional local redefinition, see CLAUDE.md merge log
+DISKS_URI = "computer:///"  # noqa: F811 -- intentional local redefinition
 _DISKS_FILE = Gio.File.new_for_uri(DISKS_URI)
 # Edit this list to control which Nautilus locations do not offer Miller View.
 # Keep the Network overview here, rather than mounted remote shares, which are
@@ -654,7 +654,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
     # ── My Computer view delegation ─────────────────────────────────────────────
     # Thin wrappers so external code (widgets.py, signal connections elsewhere in
     # this file) can keep calling ext._method(...) while the implementation lives
-    # in my_computer_view.py. See CLAUDE.md "Project structure".
+    # in my_computer_view.py.
 
     def _populate(self, win: Gtk.Window, sort: tuple[str, bool] | None = None) -> None:
         my_computer_view._populate(self, win, sort)
@@ -1227,8 +1227,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
     def _leave_computer_panel_for_slot(self, win: Gtk.Window, slot: Gtk.Widget) -> None:
         """Bridge for column_view.py: release the Computer panel's own state
         on `slot` before Column View claims the shared per-slot GtkStack.
-        column_view.py may not import my_computer_view.py directly (CLAUDE.md
-        target-module isolation), so this thin delegate is the only path
+        column_view.py may not import my_computer_view.py directly, so this thin
+        delegate is the only path
         between them (issue #137's per-slot view-election arbiter)."""
         if slot_view_owner(slot) == "computer" and getattr(slot, "_mc_computer", None) is not None:
             my_computer_view._leave_panel(self, win, slot)

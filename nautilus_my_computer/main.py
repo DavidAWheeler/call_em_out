@@ -825,6 +825,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         win.connect("destroy", self._on_window_destroyed)
         GLib.idle_add(self._remove_redundant_header_search, win)
+        GLib.idle_add(self._move_search_toggle_left, win)
         if _is_file_chooser_window(win):
             # No window-level "locations-changed" on this class — watch the
             # slot's own "location" property directly (same ground truth
@@ -1189,7 +1190,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         def ready(file_obj, result, _data):
             try:
                 info = file_obj.query_info_finish(result)
-                original = info.get_attribute_string("trash::orig-path")
+                original = info.get_attribute_byte_string("trash::orig-path")
                 if original:
                     file_obj.move_async(
                         Gio.File.new_for_path(original),
@@ -2115,10 +2116,63 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             if icon_name in {"system-search-symbolic", "search-symbolic"} or action in {
                 "win.search",
                 "win.show-search",
+                "slot.search-global",
             }:
                 alloc = widget.get_allocation()
                 if alloc.x < 220:
                     widget.set_visible(False)
+        return GLib.SOURCE_REMOVE
+
+    def _move_search_toggle_left(self, win: Gtk.Window) -> bool:
+        """Reparent Nautilus's real search toggle beside Back/Forward.
+
+        Nautilus 49 puts ``slot.search-visible`` in the trailing toolbar
+        controls. Both groups are Gtk.Box children, so the same live button
+        can be moved without duplicating its action or state.
+        """
+        search = next(
+            (
+                w
+                for w in _all_widgets(win)
+                if isinstance(w, Gtk.Button)
+                and hasattr(w, "get_action_name")
+                and w.get_action_name() == "slot.search-visible"
+                and w.get_mapped()
+            ),
+            None,
+        )
+        forward = next(
+            (
+                w
+                for w in _all_widgets(win)
+                if isinstance(w, Gtk.Button)
+                and hasattr(w, "get_action_name")
+                and w.get_action_name() == "slot.forward"
+                and w.get_mapped()
+            ),
+            None,
+        )
+        if search is None or forward is None:
+            GLib.timeout_add(100, self._move_search_toggle_left, win)
+            return GLib.SOURCE_REMOVE
+        old_parent = search.get_parent()
+        nav_group = forward
+        while nav_group is not None and type(nav_group).__name__ != "NautilusHistoryControls":
+            nav_group = nav_group.get_parent()
+        while nav_group is not None and not isinstance(nav_group.get_parent(), Gtk.Box):
+            nav_group = nav_group.get_parent()
+        new_parent = nav_group.get_parent() if nav_group is not None else None
+        if isinstance(old_parent, (Gtk.Box, Gtk.Stack)) and isinstance(new_parent, Gtk.Box):
+            old_parent.remove(search)
+            # Insert between the complete Back/Forward control and the
+            # location/search input, so it participates in toolbar sizing.
+            search.set_margin_start(40)
+            new_parent.insert_child_after(search, nav_group)
+        else:
+            _log(
+                "search toggle parents unsupported: "
+                f"{type(old_parent).__name__} -> {type(new_parent).__name__}"
+            )
         return GLib.SOURCE_REMOVE
 
     def _navigate_current_in_place(self, uri: str, win: Gtk.Window) -> bool:

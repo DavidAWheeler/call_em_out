@@ -2224,7 +2224,7 @@ class MyComputerColumn(Gtk.ScrolledWindow):
     def _on_content_changed(self, _monitor, _file, _other, _event):
         if self._content_refresh_id:
             GLib.source_remove(self._content_refresh_id)
-        self._content_refresh_id = GLib.timeout_add(35, self._reload_after_content_change)
+        self._content_refresh_id = GLib.idle_add(self._reload_after_content_change)
 
     def _reload_after_content_change(self):
         self._content_refresh_id = 0
@@ -2764,6 +2764,13 @@ class MyComputerPreviewColumn(Gtk.Box):
         modified_row, self._modified_val = _make_kv_row(_native("Modified"))
         details_area.append(modified_row)
 
+        self._trash_date_row, self._trash_date_val = _make_kv_row(_("Trash date"))
+        self._trash_date_row.set_visible(False)
+        details_area.append(self._trash_date_row)
+        self._original_row, self._original_val = _make_kv_row(_("Original location"))
+        self._original_row.set_visible(False)
+        details_area.append(self._original_row)
+
         self._trash_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self._restore_button = Gtk.Button(label=_native("Restore"))
         self._delete_button = Gtk.Button(label=_native("Delete Permanently"))
@@ -2843,14 +2850,14 @@ class MyComputerPreviewColumn(Gtk.Box):
         self._created_val.set_label(_format_datetime(info.get_attribute_uint64("time::created")))
         self._modified_val.set_label(_format_datetime(mtime))
         if self.file_uri.startswith("trash:"):
-            original = info.get_attribute_string("trash::orig-path")
+            original = info.get_attribute_byte_string("trash::orig-path")
             trashed = info.get_attribute_string("trash::deletion-date")
             if original:
-                self._detail_lbl.set_label(
-                    self._detail_lbl.get_label() + " · " + _native("Original location: ") + original
-                )
+                self._original_val.set_label(original)
+                self._original_row.set_visible(True)
             if trashed:
-                self._modified_val.set_label(trashed)
+                self._trash_date_val.set_label(trashed)
+                self._trash_date_row.set_visible(True)
             self._trash_actions.set_visible(True)
         gio_icon = info.get_icon()
         if _gicon_renders(gio_icon):

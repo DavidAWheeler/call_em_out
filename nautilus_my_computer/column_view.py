@@ -561,6 +561,7 @@ class _ColumnViewHost:
         search_bar.set_valign(Gtk.Align.START)
         self.search_toggle = Gtk.ToggleButton(icon_name="system-search-symbolic")
         self.search_toggle.set_tooltip_text(_("Search files"))
+        self.search_toggle.set_visible(False)
         self.search_entry = Gtk.SearchEntry()
         self.search_entry.set_placeholder_text(_("Search this location"))
         self.search_entry.set_width_chars(28)
@@ -746,7 +747,7 @@ class _ColumnViewHost:
         source = Gio.File.new_for_uri(uri)
         try:
             info = source.query_info("trash::orig-path", Gio.FileQueryInfoFlags.NONE, None)
-            original = info.get_attribute_string("trash::orig-path")
+            original = info.get_attribute_byte_string("trash::orig-path")
             if original:
                 target = Gio.File.new_for_path(original)
                 source.move(target, Gio.FileCopyFlags.NONE, None, None)
@@ -1901,14 +1902,10 @@ class _ColumnViewHost:
         self.focused_index = idx
         self._sync_column_selections()
         self._apply_focused_column_style()
-        # Truncating to an ancestor is the same kind of collapse as NAV_UP
-        # above -- reset the scroll position before the rebuild so the
-        # stale, pre-truncation value doesn't get baked into the new,
-        # narrower canvas (see _reset_viewport_width).
-        self._reset_viewport_width()
-        self._rebuild_chain()
-        if not self._column_fully_visible(idx):
-            self._align_to_viewport_start(self.columns[idx])
+        # Keep the deeper branch mounted until the scroll animation reaches
+        # the ancestor. Rebuilding or resetting here makes Back snap while
+        # Left-arrow uses the smooth hadjustment path.
+        self._align_to_viewport_start(self.columns[idx])
         # Deliberately no _arm_focus_retry call here: focused_index/the accent
         # highlight track the new location just above, but selecting a
         # column (click or the echo of one) no longer grabs GTK keyboard

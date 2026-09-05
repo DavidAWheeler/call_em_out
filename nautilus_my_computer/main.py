@@ -111,7 +111,6 @@ MILLER_VIEW_UNAVAILABLE_URIS = [
     "recent:///",
     "starred:///",
     "x-network-view:///",
-    "trash:///",
 ]
 COMPUTER_LABEL = _native("Computer")
 COMPUTER_ICON = "computer-symbolic"  # icon used in sidebar and path bar
@@ -825,6 +824,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         win.add_controller(key_guard)
 
         win.connect("destroy", self._on_window_destroyed)
+        GLib.idle_add(self._remove_redundant_header_search, win)
         if _is_file_chooser_window(win):
             # No window-level "locations-changed" on this class — watch the
             # slot's own "location" property directly (same ground truth
@@ -1183,6 +1183,47 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             return False
         return column_view.trash_focused_folder(self, win)
 
+    def _restore_trash_uri(self, uri: str) -> None:
+        source = Gio.File.new_for_uri(uri)
+
+        def ready(file_obj, result, _data):
+            try:
+                info = file_obj.query_info_finish(result)
+                original = info.get_attribute_string("trash::orig-path")
+                if original:
+                    file_obj.move_async(
+                        Gio.File.new_for_path(original),
+                        Gio.FileCopyFlags.NONE,
+                        GLib.PRIORITY_DEFAULT,
+                        None,
+                        None,
+                        None,
+                    )
+            except GLib.Error as error:
+                _log(f"Could not restore trashed item {uri!r}: {error.message}")
+
+        source.query_info_async(
+            "trash::orig-path",
+            Gio.FileQueryInfoFlags.NONE,
+            GLib.PRIORITY_DEFAULT,
+            None,
+            ready,
+            None,
+        )
+
+    def _delete_trash_uri(self, uri: str) -> None:
+        source = Gio.File.new_for_uri(uri)
+
+        def deleted(file_obj, result, _data):
+            try:
+                file_obj.delete_finish(result)
+            except GLib.Error as error:
+                _log(f"Could not permanently delete trashed item {uri!r}: {error.message}")
+
+        # FileOperations2 rejects trash:/// URIs on some Nautilus releases;
+        # GIO's trash backend owns the permanent-delete operation directly.
+        source.delete_async(GLib.PRIORITY_DEFAULT, None, deleted, None)
+
     def _cut_column_focused_folder(self, win: Gtk.Window) -> bool:
         """Ctrl+X: put the selected Miller folder on the clipboard as a cut."""
         return self._copy_column_focused_folder(win, cut=True)
@@ -1307,6 +1348,19 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                 f"{handler_name} consumed={consumed}"
             )
             return consumed
+        if keyval in (Gdk.KEY_f, Gdk.KEY_F) and gtk_state & Gdk.ModifierType.CONTROL_MASK:
+            # Computer view uses the native location entry as its card
+            # filter. Handle this before Nautilus's global-search actions so
+            # Ctrl+F is a reliable on/off toggle while that panel is visible.
+            if panel_state and panel_state.get("visible_view") == VIEW_DISKINFO:
+                if location_filter.toggle(self, win):
+                    return True
+            # Keep Ctrl+F a true toggle, including when the native search
+            # entry already owns focus.
+            for action in ("win.search", "win.toggle-search", "search"):
+                if self._activate_qualified_action(action, None, win):
+                    return True
+            return False
         if not panel_state or panel_state.get("visible_view") != VIEW_DISKINFO:
             return False
         # Ctrl+H: the native "view.show-hidden-files" action group IS present
@@ -2044,6 +2098,27 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                 pass
         return False
 
+    def _remove_redundant_header_search(self, win: Gtk.Window) -> bool:
+        """Hide Nautilus's standalone top-left search affordance.
+
+        The location/search control remains available in the native toolbar;
+        this removes only the duplicate button that consumes the leading
+        header space in the Column View layout.
+        """
+        for widget in _all_widgets(win):
+            if not isinstance(widget, Gtk.Button):
+                continue
+            icon_name = widget.get_icon_name() if hasattr(widget, "get_icon_name") else None
+            action = widget.get_action_name() if hasattr(widget, "get_action_name") else None
+            if icon_name in {"system-search-symbolic", "search-symbolic"} or action in {
+                "win.search",
+                "win.show-search",
+            }:
+                alloc = widget.get_allocation()
+                if alloc.x < 220:
+                    widget.set_visible(False)
+        return GLib.SOURCE_REMOVE
+
     def _navigate_current_in_place(self, uri: str, win: Gtk.Window) -> bool:
         """Navigate the window's current tab to uri. Never opens a window or a
         tab. Tries the open-location name for the running Nautilus first, the
@@ -2426,9 +2501,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         self._wire_bookmark_drop_target(wrapper, native_listbox)
         return True
 
-    def _wire_bookmark_drop_target(
-        self, wrapper: Gtk.Widget, native_listbox: Gtk.ListBox
-    ) -> None:
+    def _wire_bookmark_drop_target(self, wrapper: Gtk.Widget, native_listbox: Gtk.ListBox) -> None:
         """Accept folders dropped into the empty area below the native
         bookmark rows, matching Nautilus's Add to Bookmarks drop affordance.
 

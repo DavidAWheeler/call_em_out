@@ -35,3 +35,5 @@ build/
 # Local changelogs & notes
 .local-changelog.md
 HANDOFF.local.md
+*.local.md
+*.local/

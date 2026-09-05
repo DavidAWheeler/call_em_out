@@ -38,6 +38,7 @@ from nautilus_my_computer.context_menu import (
 )
 from nautilus_my_computer.widgets import (
     MyComputerColumn,
+    MyComputerColumnRow,
     MyComputerPreviewColumn,
     MyComputerToggleButton,
 )
@@ -163,6 +164,7 @@ _NATIVE_TOGGLE_ACTION = "slot.files-view-mode-toggle"
 # keep the layout arithmetic below legible.
 COLUMN_WIDTH = _COLUMN_WIDTH
 PREVIEW_WIDTH = _COLUMN_PREVIEW_WIDTH
+PREVIEW_MAX_WIDTH = 560
 HANDLE_WIDTH_ESTIMATE = 12
 # Generous hit margin (in px, either side of a paned's current position)
 # used to tell a genuine press-and-drag on the handle apart from GTK
@@ -604,7 +606,95 @@ class _ColumnViewHost:
         right_click = Gtk.GestureClick(button=3)
         right_click.connect("pressed", self._on_column_background_right_clicked, column)
         column.add_controller(right_click)
+        drop = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
+        drop.connect("enter", self._on_column_drop_motion)
+        drop.connect("motion", self._on_column_drop_motion)
+        drop.connect("drop", self._on_column_drop, column)
+        column.add_controller(drop)
+        column._on_files_dragged = lambda: self._watch_operation_directories([column.folder_uri])
         return column
+
+    def _on_column_drop_motion(self, target, _x: float, _y: float):
+        current = target.get_current_drop()
+        device = current.get_device() if current is not None else None
+        modifiers = device.get_modifier_state() if device else target.get_current_event_state()
+        ctrl = bool(modifiers & Gdk.ModifierType.CONTROL_MASK)
+        shift = bool(modifiers & Gdk.ModifierType.SHIFT_MASK)
+        # FileOperations2 supports copy/move, but has no link operation.
+        # Reject a link request instead of silently copying the files.
+        action = (
+            Gdk.DragAction(0)
+            if ctrl and shift
+            else Gdk.DragAction.MOVE
+            if shift
+            else Gdk.DragAction.COPY
+        )
+        offered = current.get_actions() if current is not None else Gdk.DragAction(0)
+        # Some backends already narrow the drop to the modifier-selected
+        # action and do not expose modifiers on their DnD events.
+        if offered in (Gdk.DragAction.COPY, Gdk.DragAction.MOVE):
+            action = offered
+        else:
+            action &= offered
+        target._mc_drop_action = action
+        return action
+
+    def _on_column_drop(self, target, value, x: float, y: float, column) -> bool:
+        action = getattr(target, "_mc_drop_action", Gdk.DragAction(0))
+        if action not in (Gdk.DragAction.COPY, Gdk.DragAction.MOVE):
+            return False
+        destination_uri = column.folder_uri
+        picked = column.pick(x, y, Gtk.PickFlags.DEFAULT)
+        while picked is not None and picked is not column:
+            if isinstance(picked, MyComputerColumnRow):
+                if picked.is_dir:
+                    destination_uri = picked.uri
+                break
+            picked = picked.get_parent()
+        files = value.get_files()
+        destination = Gio.File.new_for_uri(destination_uri)
+        if not files or any(destination.equal(f) or destination.has_prefix(f) for f in files):
+            return False
+        trash_files = [f for f in files if f.get_uri().startswith("trash:")]
+        if trash_files:
+            self._restore_trash_drag(trash_files, destination)
+            return True
+        self._paste_uris_into_folder(
+            [f.get_uri() for f in files],
+            destination_uri,
+            cut=action == Gdk.DragAction.MOVE,
+            clear_clipboard=False,
+        )
+        return True
+
+    def _restore_trash_drag(self, files, destination) -> None:
+        """Move trashed items through GIO so Nautilus never receives a
+        malformed ``trash:///`` URI in FileOperations2."""
+        for source in files:
+
+            def ready(file_obj, result, _data, source=source):
+                try:
+                    info = file_obj.query_info_finish(result)
+                    name = info.get_display_name() or file_obj.get_basename()
+                    file_obj.move_async(
+                        destination.get_child(name),
+                        Gio.FileCopyFlags.NONE,
+                        GLib.PRIORITY_DEFAULT,
+                        None,
+                        None,
+                        None,
+                    )
+                except GLib.Error as error:
+                    _log(f"Could not drag item out of Trash: {error.message}")
+
+            source.query_info_async(
+                "standard::display-name",
+                Gio.FileQueryInfoFlags.NONE,
+                GLib.PRIORITY_DEFAULT,
+                None,
+                ready,
+                None,
+            )
 
     def _on_column_loaded(self, column) -> None:
         """A freshly created column's enumerate_children_async just finished
@@ -628,7 +718,15 @@ class _ColumnViewHost:
         through the on_row_pressed/on_row_released callbacks passed into its
         constructor above.
         """
-        self._sync_column_selections()
+        # Loading one column must not reset selections in other columns.
+        # A reload restores its own selection by URI; only a new column
+        # needs its initial path selection seeded here.
+        if column in self.columns and column._selection_restore is None:
+            index = self.columns.index(column)
+            if index + 1 < len(self.columns):
+                column.select_child_for_uri(self.columns[index + 1].folder_uri)
+            elif self.preview_column.file_uri:
+                column.select_child_for_uri(self.preview_column.file_uri)
         self._apply_focused_column_style()
         self._set_cut_rows()
 
@@ -827,7 +925,10 @@ class _ColumnViewHost:
             modifiers = gesture.get_current_event_state()
             ctrl = bool(modifiers & Gdk.ModifierType.CONTROL_MASK)
             shift = bool(modifiers & Gdk.ModifierType.SHIFT_MASK)
-            if index is not None:
+            if ctrl or shift:
+                self.focused_index = self.columns.index(column)
+                self._apply_focused_column_style()
+            if index is not None and (ctrl or shift or not column._selection.is_selected(index)):
                 column.select_for_pointer(index, ctrl=ctrl, shift=shift)
             # Modifier-click is selection-only, like Nautilus and other file
             # managers. Keep the row gesture unclaimed so a drag can still
@@ -949,6 +1050,9 @@ class _ColumnViewHost:
         # state; it must not become the Miller column's blue :selected row.
         components.set_row_active(row.row_node(), True)
         uri = row.uri
+        selected_uris = [item.uri for item in column.selected_items()]
+        if uri not in selected_uris:
+            selected_uris = [uri]
         content_type = row.content_type or "application/octet-stream"
         default_app = Gio.AppInfo.get_default_for_type(content_type, False)
         open_with_template = _native("Open With %s")
@@ -987,9 +1091,9 @@ class _ColumnViewHost:
         )
         sections = [
             open_actions,
-                clipboard_actions_section(
-                    cut_action=lambda: self._copy_to_clipboard([uri], cut=True),
-                    copy_action=lambda: self._copy_to_clipboard([uri], cut=False),
+            clipboard_actions_section(
+                cut_action=lambda: self._copy_to_clipboard([uri], cut=True),
+                copy_action=lambda: self._copy_to_clipboard([uri], cut=False),
                 paste_action=(lambda: self._paste_into_folder(uri))
                 if self._clipboard_has_pasteable_files()
                 else None,
@@ -1003,7 +1107,7 @@ class _ColumnViewHost:
                     else None
                 ),
                 move_to_trash_action=(
-                    (lambda: self._move_to_trash(column, [uri]))
+                    (lambda: self._move_to_trash(column, selected_uris))
                     if uri.startswith("file://")
                     else None
                 ),
@@ -1224,7 +1328,7 @@ class _ColumnViewHost:
         """Paste a Nautilus Copy file list after an explicit user request."""
         try:
             value = clipboard.read_value_finish(result)
-            file_list = value.get_boxed()
+            file_list = value.get_boxed() if isinstance(value, GObject.Value) else value
             uris = [file.get_uri() for file in file_list.get_files()]
         except (GLib.Error, AttributeError, TypeError) as error:
             _log(f"Could not read clipboard files for paste: {error}")
@@ -1236,7 +1340,12 @@ class _ColumnViewHost:
             self._paste_uris_into_folder(uris, destination_uri, cut=self._clipboard_is_cut)
 
     def _paste_uris_into_folder(
-        self, source_uris: list[str], destination_uri: str, *, cut: bool
+        self,
+        source_uris: list[str],
+        destination_uri: str,
+        *,
+        cut: bool,
+        clear_clipboard: bool = True,
     ) -> None:
         """Submit a resolved Copy/Move operation and refresh affected columns."""
         source_parents = []
@@ -1251,7 +1360,7 @@ class _ColumnViewHost:
             method,
             parameters,
             destination_uri,
-            on_started=self._clear_clipboard_after_paste,
+            on_started=self._clear_clipboard_after_paste if clear_clipboard else None,
         )
 
     def _clear_clipboard_after_paste(self) -> None:
@@ -1264,6 +1373,19 @@ class _ColumnViewHost:
         watched = {uri for uri in directory_uris}
         watched_files = [Gio.File.new_for_uri(uri) for uri in watched]
         refresh_id = 0
+        expiry_id = 0
+
+        def stop_watching() -> bool:
+            nonlocal refresh_id, expiry_id
+            for source_id in (refresh_id, expiry_id):
+                if source_id:
+                    GLib.source_remove(source_id)
+            refresh_id = expiry_id = 0
+            for monitor in monitors:
+                monitor.cancel()
+                if monitor in self._operation_monitors:
+                    self._operation_monitors.remove(monitor)
+            return GLib.SOURCE_REMOVE
 
         def finish_refresh() -> bool:
             nonlocal refresh_id
@@ -1272,11 +1394,7 @@ class _ColumnViewHost:
                 column_file = Gio.File.new_for_uri(column.folder_uri)
                 if any(column_file.equal(watched_file) for watched_file in watched_files):
                     column.reload()
-            for monitor in monitors:
-                monitor.cancel()
-                if monitor in self._operation_monitors:
-                    self._operation_monitors.remove(monitor)
-            return GLib.SOURCE_REMOVE
+            return stop_watching()
 
         def on_changed(*_args) -> None:
             nonlocal refresh_id
@@ -1295,6 +1413,9 @@ class _ColumnViewHost:
             monitor.connect("changed", on_changed)
             monitors.append(monitor)
             self._operation_monitors.append(monitor)
+        # Cancelled drags and operations that never change a directory must
+        # not retain monitors for the lifetime of the Nautilus window.
+        expiry_id = GLib.timeout_add_seconds(30, stop_watching)
 
     def _show_destination_picker(self, uri: str, *, move: bool) -> None:
         """Choose a destination folder in Nautilus's modal native file dialog."""
@@ -1406,9 +1527,7 @@ class _ColumnViewHost:
         chain_update = "rebuild"
         if already_open:
             fits = self._new_content_fits(self.columns[index + 1].width)
-            for stale_column in stale[1:]:
-                stale_column.destroy_enumeration()
-            del self.columns[index + 2 :]
+            self._defer_trim_columns(index + 2)
             # Reusing the immediate child without anything beyond it leaves
             # the widget hierarchy intact. Rebuilding it here used to unmap
             # every ListView just for a selection change.
@@ -1425,9 +1544,18 @@ class _ColumnViewHost:
             # default. Columns beyond that slot are genuinely gone, not
             # replaced.
             reused_width = stale[0].width if stale else None
-            for stale_column in stale:
-                stale_column.destroy_enumeration()
-            del self.columns[index + 1 :]
+            if direction == NAV_UP:
+                # Keep deeper columns mounted while the viewport eases left;
+                # trim them after the transition so Back feels like sliding
+                # over an existing canvas instead of rebuilding from zero.
+                # The replacement child is appended after the old deeper
+                # columns below. Keep that new tail column and discard the
+                # old branch only after the horizontal transition settles.
+                self._defer_trim_columns(index + 1, keep_tail=1)
+            else:
+                for stale_column in stale:
+                    stale_column.destroy_enumeration()
+                del self.columns[index + 1 :]
 
             if row.is_dir:
                 new_width = reused_width if reused_width is not None else COLUMN_WIDTH
@@ -1607,9 +1735,7 @@ class _ColumnViewHost:
         # forward) -- any keyboard commit still waiting out its debounce
         # targets a column this is about to collapse or replace.
         self._cancel_row_commit()
-        for stale in self.columns[idx + 1 :]:
-            stale.destroy_enumeration()
-        del self.columns[idx + 1 :]
+        self._defer_trim_columns(idx + 1)
 
         self._set_preview(None)
         # Keyboard nav treats the deepest remaining column as "current"
@@ -1617,7 +1743,7 @@ class _ColumnViewHost:
         # accent highlight should land where the arrows would next act, not
         # one column short of it (same convention _drill_into_open_chain
         # below uses for its own newly appended column).
-        self.focused_index = len(self.columns) - 1
+        self.focused_index = idx
         self._sync_column_selections()
         self._apply_focused_column_style()
         # Truncating to an ancestor is the same kind of collapse as NAV_UP
@@ -1666,6 +1792,29 @@ class _ColumnViewHost:
         self._fade_in(self.preview_column, duration=PREVIEW_FADE_DURATION_MS)
         if not fits:
             self._align_to_viewport_end(new_column)
+
+    def _defer_trim_columns(self, start: int, *, keep_tail: int = 0) -> None:
+        """Trim old deeper columns after the horizontal transition settles.
+
+        ``keep_tail`` is used when Back replaces a stale branch with a fresh
+        child before the old widgets are removed, so the replacement remains
+        mounted throughout the transition.
+        """
+        generation = getattr(self, "_trim_generation", 0) + 1
+        self._trim_generation = generation
+
+        def trim() -> bool:
+            if generation != getattr(self, "_trim_generation", 0):
+                return GLib.SOURCE_REMOVE
+            end = len(self.columns) - keep_tail if keep_tail else len(self.columns)
+            if start < end:
+                for old in self.columns[start:end]:
+                    old.destroy_enumeration()
+                del self.columns[start:end]
+                self._rebuild_chain()
+            return GLib.SOURCE_REMOVE
+
+        GLib.timeout_add(280, trim)
 
     def _sync_column_selections(self) -> None:
         """Each column's own row selection is derived from the URI chain
@@ -1797,6 +1946,18 @@ class _ColumnViewHost:
             # queued for this chain should land after the user has moved on.
             self._cancel_row_commit()
             return False
+        if keyval in (Gdk.KEY_a, Gdk.KEY_A) and int(gtk_state) == int(
+            Gdk.ModifierType.CONTROL_MASK
+        ):
+            column = self._focused_column()
+            if column is None:
+                return False
+            self._cancel_row_commit()
+            column._selection.select_all()
+            if column._cursor_index is None and column.item_count():
+                column._cursor_index = 0
+                column._selection_anchor = 0
+            return True
         if int(gtk_state) & _KEY_ACCEL_MODIFIER_MASK:
             # Someone else's accelerator (Alt+Left/Right history, Ctrl+L,
             # Super+...) -- let it through unclaimed.
@@ -1842,6 +2003,10 @@ class _ColumnViewHost:
         returns without reselecting or re-scrolling -- that would otherwise
         arm a real commit (rebuild the chain, re-push the slot location) for
         a press that didn't actually move anything."""
+        if extend:
+            # A preceding plain arrow may still have a delayed navigation
+            # pending. It must not collapse this range after the timer fires.
+            self._cancel_row_commit()
         count = column.item_count()
         if count == 0:
             return True
@@ -1894,7 +2059,7 @@ class _ColumnViewHost:
         col = self._focused_column()
         if col is not None:
             if not self._column_fully_visible(self.focused_index):
-                self._align_to_viewport_start(col)
+                self._align_to_viewport_pos(col, 24)
             # _flush_row_commit above may just have kicked off an async
             # slot navigation (_sync_slot_location) -- Nautilus's own
             # eventual re-focus of its hidden view can steal a plain
@@ -2261,7 +2426,9 @@ class _ColumnViewHost:
             preview_width = preview_default_width
         else:
             available_for_preview = viewport_width - fixed_width
-            preview_width = max(preview_default_width, available_for_preview)
+            preview_width = min(
+                PREVIEW_MAX_WIDTH, max(preview_default_width, available_for_preview)
+            )
 
         total_width = fixed_width + preview_width
         canvas_width = max(total_width, viewport_width, visible_right_edge)

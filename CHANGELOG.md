@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased (personal fork)
+
+- Improved Column View selection, multi-file drag and drop, folder hover
+  navigation, refresh handling, and group-aware Move to Trash.
+- Added Trash preview metadata and Restore/Delete Permanently actions, with
+  direct GIO deletion for trash items.
+- Made Ctrl+F toggle the Computer card filter and prevented Enter from
+  accepting an unselected location completion.
+- Kept the project description courteous: this fork is like spicy My Computer
+  for Nautilus and credits the upstream project for the original extension.
+
 All notable changes to this project are documented here.
 
 ---

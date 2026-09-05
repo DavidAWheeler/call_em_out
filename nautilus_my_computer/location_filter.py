@@ -44,6 +44,10 @@ def attach_location_filter_watch(ext, nautilus_win: Gtk.Window) -> None:
         return
     entry.connect("changed", functools.partial(_on_location_text_changed, ext), nautilus_win)
     entry.connect("cancel", functools.partial(_on_location_cancel, ext), nautilus_win)
+    # In the Computer panel this entry is a live card filter. Enter commits
+    # the typed query; it must not hand the first path-completion suggestion
+    # to Nautilus as though the user had selected it.
+    entry.connect("activate", functools.partial(_on_location_activate, ext), nautilus_win)
     state["location_filter_watch_attached"] = True
     _log(f"location filter watch attached ({type(entry).__name__})")
 
@@ -94,6 +98,36 @@ def _on_location_cancel(ext, _entry: Gtk.Editable, nautilus_win: Gtk.Window) -> 
     _log("location filter cancelled -> reset to default view")
     state["location_filter_owned"] = False
     ext._apply_card_filter(nautilus_win, "")
+
+
+def _on_location_activate(ext, entry: Gtk.Editable, nautilus_win: Gtk.Window) -> bool:
+    state = ext._active_panel_state(nautilus_win)
+    if not state or not state.get("location_filter_owned"):
+        return False
+    # Keep the query visible and applied. Returning True stops the location
+    # entry's completion handler from opening its first suggestion.
+    ext._apply_card_filter(nautilus_win, entry.get_text())
+    return True
+
+
+def toggle(ext, nautilus_win: Gtk.Window) -> bool:
+    """Toggle the address-bar-backed Computer card filter."""
+    state = ext._active_panel_state(nautilus_win)
+    if not state or state.get("visible_view") != VIEW_DISKINFO:
+        return False
+    entry = find_location_entry(nautilus_win)
+    if entry is None:
+        return False
+    if state.get("location_filter_owned"):
+        state["location_filter_owned"] = False
+        entry.set_text("")
+        _on_location_cancel(ext, entry, nautilus_win)
+        return True
+    state["location_filter_owned"] = True
+    if reveal_and_seed(ext, nautilus_win, ""):
+        return True
+    state["location_filter_owned"] = False
+    return False
 
 
 def reveal_and_seed(ext, nautilus_win: Gtk.Window, char: str) -> bool:

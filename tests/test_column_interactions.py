@@ -1,0 +1,213 @@
+"""Regression checks using GTK's actual selection model and drag providers.
+
+Run with a GTK display: python3 -m unittest discover -s tests -v
+"""
+
+import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+from nautilus_my_computer.column_view import _ColumnViewHost
+from nautilus_my_computer.widgets import (
+    Gdk,
+    Gio,
+    GLib,
+    Gtk,
+    MyComputerColumn,
+    MyComputerColumnRow,
+    _ColumnRowItem,
+)
+
+
+class ColumnInteractions(unittest.TestCase):
+    def setUp(self):
+        Gtk.init()
+        with patch.object(MyComputerColumn, "_load"):
+            self.column = MyComputerColumn(None, "file:///tmp", Mock())
+        for i in range(6):
+            self.column._store.append(_ColumnRowItem(f"file:///tmp/{i}", str(i), False))
+
+    def selected(self):
+        return [item.display_name for item in self.column.selected_items()]
+
+    def test_control_click_adds_and_removes_without_clearing_others(self):
+        self.column.select_index(0)
+        self.column.select_for_pointer(3, ctrl=True)
+        self.assertEqual(self.selected(), ["0", "3"])
+        self.column.select_for_pointer(0, ctrl=True)
+        self.assertEqual(self.selected(), ["3"])
+        self.column.select_for_pointer(3, ctrl=True)
+        self.assertEqual(self.selected(), [])
+
+    def test_shift_click_uses_keyboard_anchor_and_shrinks_range(self):
+        self.column.select_index(1)
+        self.column.select_for_pointer(4, shift=True)
+        self.assertEqual(self.selected(), ["1", "2", "3", "4"])
+        self.column.select_for_pointer(2, shift=True)
+        self.assertEqual(self.selected(), ["1", "2"])
+        self.assertEqual(self.column.selected_index(), 2)
+
+    def test_control_shift_adds_range(self):
+        self.column.select_index(0)
+        self.column.select_for_pointer(3, ctrl=True)
+        self.column.select_for_pointer(5, ctrl=True, shift=True)
+        self.assertEqual(self.selected(), ["0", "3", "4", "5"])
+
+    def test_shift_arrow_cancels_delayed_navigation_even_at_boundary(self):
+        host = SimpleNamespace(_cancel_row_commit=Mock(), _arm_row_commit=Mock())
+        self.column.select_index(4)
+        _ColumnViewHost._move_column_selection(host, self.column, Gdk.KEY_Down, extend=True)
+        self.assertEqual(self.selected(), ["4", "5"])
+        _ColumnViewHost._move_column_selection(host, self.column, Gdk.KEY_Down, extend=True)
+        self.assertEqual(self.selected(), ["4", "5"])
+        self.assertEqual(host._cancel_row_commit.call_count, 2)
+        host._arm_row_commit.assert_not_called()
+
+    def test_plain_press_keeps_group_for_drag(self):
+        self.column.select_index(0)
+        self.column.select_for_pointer(2, ctrl=True)
+        row = SimpleNamespace(uri="file:///tmp/0")
+        gesture = Mock()
+        gesture.get_current_button.return_value = Gdk.BUTTON_PRIMARY
+        gesture.get_current_event_state.return_value = Gdk.ModifierType(0)
+        host = SimpleNamespace(_cancel_row_commit=Mock())
+        _ColumnViewHost._on_row_pressed(host, gesture, 1, 1, 1, self.column, row)
+        self.assertEqual(self.selected(), ["0", "2"])
+        gesture.set_state.assert_not_called()
+
+    def test_modifier_click_moves_keyboard_focus_to_its_column(self):
+        host = SimpleNamespace(
+            _cancel_row_commit=Mock(),
+            columns=[object(), self.column],
+            focused_index=0,
+            _apply_focused_column_style=Mock(),
+        )
+        gesture = Mock()
+        gesture.get_current_button.return_value = Gdk.BUTTON_PRIMARY
+        gesture.get_current_event_state.return_value = Gdk.ModifierType.CONTROL_MASK
+        _ColumnViewHost._on_row_pressed(
+            host, gesture, 1, 1, 1, self.column, SimpleNamespace(uri="file:///tmp/2")
+        )
+        self.assertEqual(host.focused_index, 1)
+        self.assertEqual(self.selected(), ["2"])
+
+    def test_reload_preserves_selection_and_anchor_by_uri_after_sort(self):
+        self.column._ext = SimpleNamespace(
+            _nautilus_prefs=SimpleNamespace(
+                hidden_files=lambda: False, sort_directories_first=lambda: False
+            )
+        )
+        self.column.select_index(1)
+        self.column.select_for_pointer(4, ctrl=True)
+        with patch.object(MyComputerColumn, "_load"):
+            self.column.reload()
+            self.column.reload()  # A second settings change while loading.
+        infos = []
+        for name in ["0", "1", "3", "4", "5"]:
+            info = Gio.FileInfo()
+            info.set_name(name)
+            info.set_display_name(name)
+            info.set_file_type(Gio.FileType.REGULAR)
+            info.set_icon(Gio.ThemedIcon.new("text-x-generic"))
+            info.set_content_type("text/plain")
+            infos.append(info)
+        self.column._sort = ("name", True)
+        self.column._populate_rows(infos, {})
+        self.assertEqual(self.selected(), ["4", "1"])
+        self.assertEqual(self.column.selected_item().display_name, "4")
+        self.column.select_for_pointer(3, shift=True)
+        self.assertEqual(self.selected(), ["4", "3", "1"])
+
+    def test_loading_sibling_does_not_clear_existing_selection(self):
+        self.column.select_index(0)
+        self.column.select_for_pointer(3, ctrl=True)
+        with patch.object(MyComputerColumn, "_load"):
+            sibling = MyComputerColumn(None, "file:///tmp/other", Mock())
+        host = SimpleNamespace(
+            columns=[self.column, sibling],
+            preview_column=SimpleNamespace(file_uri=None),
+            _apply_focused_column_style=Mock(),
+            _set_cut_rows=Mock(),
+            _pending_child_focus=None,
+        )
+        _ColumnViewHost._on_column_loaded(host, sibling)
+        self.assertEqual(self.selected(), ["0", "3"])
+
+    def test_column_drop_uses_native_move_without_clearing_clipboard(self):
+        host = SimpleNamespace(_paste_uris_into_folder=Mock())
+        target = SimpleNamespace(_mc_drop_action=Gdk.DragAction.MOVE)
+        value = Gdk.FileList.new_from_list([Gio.File.new_for_uri("file:///elsewhere/a")])
+        self.assertTrue(_ColumnViewHost._on_column_drop(host, target, value, 0, 0, self.column))
+        host._paste_uris_into_folder.assert_called_once_with(
+            ["file:///elsewhere/a"], "file:///tmp", cut=True, clear_clipboard=False
+        )
+
+    def test_column_drop_rejects_folder_into_itself_or_descendant(self):
+        host = SimpleNamespace(_paste_uris_into_folder=Mock())
+        target = SimpleNamespace(_mc_drop_action=Gdk.DragAction.COPY)
+        for uri in ["file:///tmp", "file:///"]:
+            value = Gdk.FileList.new_from_list([Gio.File.new_for_uri(uri)])
+            self.assertFalse(
+                _ColumnViewHost._on_column_drop(host, target, value, 0, 0, self.column)
+            )
+        host._paste_uris_into_folder.assert_not_called()
+
+    def test_link_modifier_is_rejected_for_column_destination(self):
+        target = Mock()
+        target.get_current_drop.return_value.get_device.return_value = None
+        target.get_current_event_state.return_value = (
+            Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK
+        )
+        target.get_current_drop.return_value.get_actions.return_value = (
+            Gdk.DragAction.COPY | Gdk.DragAction.MOVE | Gdk.DragAction.LINK
+        )
+        self.assertEqual(_ColumnViewHost._on_column_drop_motion(None, target, 0, 0), 0)
+
+    def test_control_a_selects_all_without_navigating(self):
+        host = SimpleNamespace(_focused_column=lambda: self.column, _cancel_row_commit=Mock())
+        self.assertTrue(
+            _ColumnViewHost._on_key_pressed(host, None, Gdk.KEY_a, 0, Gdk.ModifierType.CONTROL_MASK)
+        )
+        self.assertEqual(self.selected(), [str(i) for i in range(6)])
+        self.assertEqual(self.column.selected_index(), 0)
+
+    def test_backend_move_offer_is_honored_without_modifier_event(self):
+        target = Mock()
+        target.get_current_drop.return_value.get_device.return_value = None
+        target.get_current_event_state.return_value = Gdk.ModifierType(0)
+        target.get_current_drop.return_value.get_actions.return_value = Gdk.DragAction.MOVE
+        self.assertEqual(
+            _ColumnViewHost._on_column_drop_motion(None, target, 0, 0), Gdk.DragAction.MOVE
+        )
+
+    def drag_uris(self, index):
+        row = MyComputerColumnRow()
+        row._column = self.column
+        row.item = self.column._store.get_item(index)
+        provider = row._on_drag_prepare(None, 0, 0)
+        clipboard = Gdk.Display.get_default().get_clipboard()
+        clipboard.set_content(provider)
+        results = []
+
+        def ready(source, result):
+            results.append([f.get_uri() for f in source.read_value_finish(result).get_files()])
+
+        clipboard.read_value_async(Gdk.FileList, GLib.PRIORITY_DEFAULT, None, ready)
+        while not results:
+            GLib.MainContext.default().iteration(True)
+        clipboard.set_content(None)
+        self.assertFalse(provider.ref_formats().contain_mime_type("x-special/gnome-copied-files"))
+        return results[0]
+
+    def test_drag_exports_every_selected_file(self):
+        self.column.select_index(0)
+        self.column.select_for_pointer(4, ctrl=True)
+        self.assertEqual(self.drag_uris(0), ["file:///tmp/0", "file:///tmp/4"])
+
+    def test_drag_of_unselected_row_does_not_export_stale_selection(self):
+        self.column.select_index(0)
+        self.assertEqual(self.drag_uris(2), ["file:///tmp/2"])
+
+
+if __name__ == "__main__":
+    unittest.main()

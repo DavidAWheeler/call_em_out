@@ -1265,11 +1265,20 @@ class MyComputerColumnRow(Gtk.Box):
     def _on_drag_prepare(self, _source, _x: float, _y: float):
         if self.item is None:
             return None
-        uri = self.item.uri
-        file_list = Gdk.FileList.new_from_list([Gio.File.new_for_uri(uri)])
+        column = getattr(self, "_column", None)
+        on_files_dragged = getattr(column, "_on_files_dragged", None)
+        if on_files_dragged is not None:
+            on_files_dragged()
+        items = column.selected_items() if column is not None else []
+        if not any(item.uri == self.item.uri for item in items):
+            items = [self.item]
+        file_list = Gdk.FileList.new_from_list([Gio.File.new_for_uri(item.uri) for item in items])
         # Gdk.FileList leaves action negotiation to the destination, so
         # Nautilus can honor its normal copy/move/link modifier behavior.
-        return Gdk.ContentProvider.new_for_value(file_list)
+        value = GObject.Value()
+        value.init(Gdk.FileList)
+        value.set_boxed(file_list)
+        return Gdk.ContentProvider.new_for_value(value)
 
     @property
     def uri(self) -> str | None:
@@ -1702,6 +1711,10 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         # signature _ColumnViewHost._on_row_pressed/_released already expect.
         self._on_row_pressed = on_row_pressed
         self._on_row_released = on_row_released
+        self._drop_hover_id = 0
+        self._drop_hover_row = None
+        self._content_monitor = None
+        self._content_refresh_id = 0
         self._cancellable = Gio.Cancellable()
         # Distinguish a genuinely empty folder from one whose asynchronous
         # enumeration has not produced its model yet. Column View's keyboard
@@ -1756,6 +1769,7 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         # recycled ListView row never becomes the source of truth.
         self._cursor_index: int | None = None
         self._selection_anchor: int | None = None
+        self._selection_restore = None
         self._row_widgets: dict[int, MyComputerColumnRow] = {}
 
         factory = Gtk.SignalListItemFactory()
@@ -1828,6 +1842,7 @@ class MyComputerColumn(Gtk.ScrolledWindow):
 
     def _on_factory_setup(self, _factory, list_item: Gtk.ListItem) -> None:
         row = MyComputerColumnRow()
+        row._column = self
         list_item.set_child(row)
         # GtkListView's internal per-item container runs its own
         # Gtk.GestureClick that grabs keyboard focus unconditionally on press
@@ -1842,6 +1857,54 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         click.connect("pressed", self._on_row_widget_pressed, row)
         click.connect("released", self._on_row_widget_released, row)
         row.add_controller(click)
+        drop = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
+        drop.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        drop.connect("enter", self._on_row_drop_enter, row)
+        drop.connect("motion", self._on_row_drop_motion, row)
+        drop.connect("leave", self._on_row_drop_leave, row)
+        drop.connect("drop", self._on_row_drop, row)
+        row.add_controller(drop)
+
+    def _on_row_drop_enter(self, target, _x, _y, row):
+        if row.item is None or not row.is_dir:
+            return Gdk.DragAction(0)
+        self._drop_hover_row = row
+        if getattr(self, "_drop_hover_id", 0):
+            GLib.source_remove(self._drop_hover_id)
+        self._drop_hover_id = GLib.timeout_add(650, self._activate_drop_hover)
+        return self._on_row_drop_motion(target, _x, _y, row)
+
+    def _on_row_drop_motion(self, target, _x, _y, row):
+        if row is not getattr(self, "_drop_hover_row", None):
+            return Gdk.DragAction(0)
+        offered = target.get_current_drop().get_actions()
+        return Gdk.DragAction.MOVE if offered & Gdk.DragAction.MOVE else Gdk.DragAction.COPY
+
+    def _on_row_drop_leave(self, _target, row):
+        if row is self._drop_hover_row:
+            self._cancel_drop_hover()
+
+    def _cancel_drop_hover(self):
+        if getattr(self, "_drop_hover_id", 0):
+            GLib.source_remove(self._drop_hover_id)
+        self._drop_hover_id = 0
+        self._drop_hover_row = None
+
+    def _activate_drop_hover(self):
+        row = getattr(self, "_drop_hover_row", None)
+        self._drop_hover_id = 0
+        if row is not None and row.item is not None and row.is_dir:
+            self._on_row_activated(self, row.item)
+        return GLib.SOURCE_REMOVE
+
+    def _on_row_drop(self, target, value, _x, _y, row):
+        self._cancel_drop_hover()
+        action = self._on_row_drop_motion(target, _x, _y, row)
+        if action == 0:
+            return False
+        # Let the owning Column View drop target perform the actual transfer;
+        # this target exists to provide folder hover navigation only.
+        return False
 
     def _on_row_widget_pressed(
         self,
@@ -1906,6 +1969,18 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         """Re-enumerate this column's own folder in place (e.g. after the
         hidden-files setting changes), without touching sibling columns or
         collapsing the Miller chain."""
+        if self._loaded or self._store.get_n_items():
+            cursor = self.selected_item()
+            anchor = (
+                self._store.get_item(self._selection_anchor)
+                if self._selection_anchor is not None
+                else None
+            )
+            self._selection_restore = (
+                {item.uri for item in self.selected_items()},
+                cursor.uri if cursor is not None else None,
+                anchor.uri if anchor is not None else None,
+            )
         self._cancellable.cancel()
         self._cancellable = Gio.Cancellable()
         self._loaded = False
@@ -2121,9 +2196,35 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         if items:
             self._store.splice(0, 0, items)
 
+        if self._selection_restore is not None:
+            selected, cursor, anchor = self._selection_restore
+            for index, item in enumerate(items):
+                if item.uri in selected:
+                    self._selection.select_item(index, False)
+            self._cursor_index = self._index_for_uri(cursor) if cursor is not None else None
+            self._selection_anchor = self._index_for_uri(anchor) if anchor is not None else None
         self._loaded = True
+        if self._content_monitor is None:
+            try:
+                self._content_monitor = Gio.File.new_for_uri(self.folder_uri).monitor_directory(
+                    Gio.FileMonitorFlags.WATCH_MOVES, None
+                )
+                self._content_monitor.connect("changed", self._on_content_changed)
+            except GLib.Error:
+                self._content_monitor = None
         if callable(self._on_loaded):
             self._on_loaded(self)
+        self._selection_restore = None
+
+    def _on_content_changed(self, _monitor, _file, _other, _event):
+        if self._content_refresh_id:
+            GLib.source_remove(self._content_refresh_id)
+        self._content_refresh_id = GLib.timeout_add(35, self._reload_after_content_change)
+
+    def _reload_after_content_change(self):
+        self._content_refresh_id = 0
+        self.reload()
+        return GLib.SOURCE_REMOVE
 
     def _index_for_uri(self, uri: str) -> int | None:
         norm = uri.rstrip("/")
@@ -2148,9 +2249,7 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         self._cursor_index = None
         self._selection_anchor = None
 
-    def select_index(
-        self, index: int, *, extend: bool = False
-    ) -> "_ColumnRowItem | None":
+    def select_index(self, index: int, *, extend: bool = False) -> "_ColumnRowItem | None":
         """Select this column's entry at index (clamped into range) and
         return its model item, or None if the folder is empty (or hasn't
         finished enumerating yet).
@@ -2183,7 +2282,7 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         if self._selection.is_selected(index):
             self._selection.unselect_item(index)
         else:
-            self._selection.select_item(index, True)
+            self._selection.select_item(index, False)
         self._cursor_index = index
         self._selection_anchor = index
         return self._store.get_item(index)
@@ -2192,25 +2291,22 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         self, index: int, *, ctrl: bool = False, shift: bool = False
     ) -> "_ColumnRowItem | None":
         """Apply standard plain/Ctrl/Shift pointer selection semantics."""
+        if shift:
+            return self.extend_selection_to(index, additive=ctrl)
         if ctrl:
             return self.toggle_index(index)
-        if shift and self._selection_anchor is not None:
-            return self.extend_selection_to(index)
         return self.select_index(index)
 
-    def extend_selection_to(self, index: int) -> "_ColumnRowItem | None":
+    def extend_selection_to(self, index: int, *, additive: bool = False) -> "_ColumnRowItem | None":
         """Extend the model selection from its anchor through ``index``."""
         n = self._store.get_n_items()
         if n == 0:
             return None
         index = max(0, min(index, n - 1))
         if self._selection_anchor is None:
-            self._selection_anchor = (
-                self._cursor_index if self._cursor_index is not None else index
-            )
+            self._selection_anchor = self._cursor_index if self._cursor_index is not None else index
         start = min(self._selection_anchor, index)
-        self._selection.unselect_all()
-        self._selection.select_range(start, abs(index - self._selection_anchor) + 1)
+        self._selection.select_range(start, abs(index - self._selection_anchor) + 1, not additive)
         self._cursor_index = index
         return self._store.get_item(index)
 
@@ -2434,6 +2530,9 @@ class MyComputerColumn(Gtk.ScrolledWindow):
 
     def destroy_enumeration(self) -> None:
         self._cancellable.cancel()
+        if self._content_monitor is not None:
+            self._content_monitor.cancel()
+            self._content_monitor = None
 
 
 def _is_media_content_type(content_type: str) -> bool:
@@ -2660,6 +2759,16 @@ class MyComputerPreviewColumn(Gtk.Box):
         modified_row, self._modified_val = _make_kv_row(_native("Modified"))
         details_area.append(modified_row)
 
+        self._trash_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self._restore_button = Gtk.Button(label=_native("Restore"))
+        self._delete_button = Gtk.Button(label=_native("Delete Permanently"))
+        self._restore_button.connect("clicked", self._restore_trash_item)
+        self._delete_button.connect("clicked", self._delete_trash_item)
+        self._trash_actions.append(self._restore_button)
+        self._trash_actions.append(self._delete_button)
+        self._trash_actions.set_visible(False)
+        details_area.append(self._trash_actions)
+
         self._dim_row, self._dim_val = _make_kv_row(_("Dimensions"))
         # Reserve the row's height up front for images/videos (a fast, sync,
         # I/O-free filename guess -- no MIME sniffing) rather than waiting for
@@ -2702,7 +2811,7 @@ class MyComputerPreviewColumn(Gtk.Box):
         gfile = Gio.File.new_for_uri(self.file_uri)
         gfile.query_info_async(
             "standard::display-name,standard::icon,standard::content-type,standard::size,"
-            "time::modified,time::created",
+            "time::modified,time::created,trash::orig-path,trash::deletion-date",
             Gio.FileQueryInfoFlags.NONE,
             GLib.PRIORITY_DEFAULT,
             self._cancellable,
@@ -2728,6 +2837,16 @@ class MyComputerPreviewColumn(Gtk.Box):
         mtime = info.get_attribute_uint64("time::modified")
         self._created_val.set_label(_format_datetime(info.get_attribute_uint64("time::created")))
         self._modified_val.set_label(_format_datetime(mtime))
+        if self.file_uri.startswith("trash:"):
+            original = info.get_attribute_string("trash::orig-path")
+            trashed = info.get_attribute_string("trash::deletion-date")
+            if original:
+                self._detail_lbl.set_label(
+                    self._detail_lbl.get_label() + " · " + _native("Original location: ") + original
+                )
+            if trashed:
+                self._modified_val.set_label(trashed)
+            self._trash_actions.set_visible(True)
         gio_icon = info.get_icon()
         if _gicon_renders(gio_icon):
             self._icon.set_from_gicon(gio_icon)
@@ -2737,8 +2856,16 @@ class MyComputerPreviewColumn(Gtk.Box):
             self._load_preview_image()
         else:
             self.set_preview_slot(PREVIEW_SLOT_ICON)
-            self._maybe_load_thumbnail(content_type, mtime)
+        self._maybe_load_thumbnail(content_type, mtime)
         self._maybe_load_dimensions(content_type)
+
+    def _restore_trash_item(self, _button) -> None:
+        if self.file_uri and hasattr(self._ext, "_restore_trash_uri"):
+            self._ext._restore_trash_uri(self.file_uri)
+
+    def _delete_trash_item(self, _button) -> None:
+        if self.file_uri and hasattr(self._ext, "_delete_trash_uri"):
+            self._ext._delete_trash_uri(self.file_uri)
 
     def _load_preview_image(self) -> None:
         """Decode a real local image on a worker thread for the large preview.

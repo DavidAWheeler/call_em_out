@@ -1,6 +1,6 @@
 # call_em_out
 
-`call_em_out` is a ramshackle attempt to improve the Column View work started by the person who made the plugin we forked: [My Computer for Nautilus](https://github.com/yannmasoch/nautilus-my-computer). The original author deserves credit for the extension, its Computer view, and the Column View foundation. This is a personal, occasionally spicy set of usability experiments on top of that work.
+`call_em_out` is a ramshackle attempt to improve the Column View work started by the person who made the plugin we forked: [My Computer for Nautilus](https://github.com/yannmasoch/nautilus-my-computer). The original author deserves credit for the extension, its Computer view, and the Column View foundation. This is a personal set of usability experiments on top of that work.
 
 ## Install
 
@@ -13,7 +13,7 @@ nautilus --quit
 
 Open Files again. The installer puts the extension in your user data directory; it does not require copying files by hand.
 
-## What this fork changes
+## What's working
 
 - More dependable Ctrl/Shift multi-selection, including selection that survives refreshes.
 - Multi-file drag and drop: local moves by default, remote/NAS transfers copy,
@@ -26,10 +26,20 @@ Open Files again. The installer puts the extension in your user data directory; 
 - Sliding Back navigation, safer bookmark jumps, and resize behavior that
   reveals hidden columns before stretching the preview.
 
-The fork does not replace Nautilus or claim to be a new file manager. It makes
-the original extension spicier for one personal workflow and keeps native Grid
-and List views available. The header integration depends on Nautilus internals
-and may need adjustment after Nautilus updates.
+The fork does not replace Nautilus or claim to be a new file manager. It keeps
+native Grid and List views available.
+
+## What needs work
+
+The desktop shell can still choose to show its own drop-action menu for a
+cross-application Trash drag; folder drops inside Nautilus are move-only.
+Search scope is intentionally bounded, and Recent remains dependent on the
+underlying `recent:///` provider's metadata.
+
+## What's next
+
+The next useful targets are deeper Recent actions, searchable scope controls,
+and compatibility probes for Nautilus private-header changes.
 
 Install and usage information is in [docs/USER_GUIDE.md](docs/USER_GUIDE.md). The detailed status is in [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md).
 

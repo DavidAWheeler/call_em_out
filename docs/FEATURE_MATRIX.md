@@ -1,6 +1,6 @@
 # Fork feature matrix
 
-`call_em_out` is like spicy My Computer for Nautilus: a personal fork of the [original project](https://github.com/yannmasoch/nautilus-my-computer). The percentages below describe this fork's progress toward a comfortable personal workflow. They do not rate the original project.
+`call_em_out` is a ramshackle personal fork of the [original project](https://github.com/yannmasoch/nautilus-my-computer), aimed at making its Column View more comfortable. The percentages below describe this fork's progress toward that personal workflow. They do not rate the original project.
 
 | Area | Progress | Current functionality | Current bugs | Next up | Reach goal |
 | --- | ---: | --- | --- | --- | --- |
@@ -9,8 +9,8 @@
 | Copy / paste | 95% | Multi-item copy/cut/paste uses Nautilus operations and monitored refresh | Permission-escalation UX remains Nautilus/GIO dependent | Exercise protected destinations | Native parity |
 | Drag and drop | 92% | Multi-file sources, local-move default, remote-copy default, direct folder rows, hover-open, Trash drag-out | Cancelling a materialized Trash drag can leave its file in the user cache | Restore cancelled staging files to Trash | Native semantics everywhere |
 | Multi-selection | 95% | Ctrl toggle, Shift ranges, Ctrl+Shift ranges, Ctrl+A, refresh-safe anchors, group Trash | Accessibility announcements not audited | Manual AT-SPI review | Native parity |
-| Search | 90% | Header toggle, Ctrl+F on/off, live result column, Enter submission, folder traversal, file preview and Go to Folder; Computer searches Home and `/mnt` | Bounded to four levels and 200 matches; no explicit worker cancellation | Add cancellation and configurable scope | Fast complete search with native-quality scope controls |
-| Recent columns | 55% | Recent bookmark enumerates and previews items through the Miller host | Folder activation and file operations still depend on Nautilus' `recent:///` provider | Add a dedicated Recent result column with native rename/copy/move/delete actions | Full Recent parity |
+| Search | 93% | Header toggle, Ctrl+F on/off, live result column, Enter submission, adjacent folder-result column, file preview and Go to Folder; Computer searches Home and `/mnt` | Bounded to four levels and 200 matches; no explicit worker cancellation | Add cancellation and configurable scope | Fast complete search with native-quality scope controls |
+| Recent columns | 70% | Recent opens in Column View, enumerates and previews items through the Miller host; folders can drill into their contents | Rename/copy/move/delete availability follows Nautilus' `recent:///` provider metadata | Add provider-specific action coverage | Full Recent parity |
 | Focus when navigating back | 95% | Back scrolls to the ancestor while retaining the deeper branch and correct current column | Rapid mixed Back/path-bar input needs more stress testing | Add a navigation-fuzz harness | Deterministic focus and scroll |
 | Column View default | 90% | Persistent default, Ctrl+3, and forced Column View for Trash | Unsupported Nautilus virtual locations still fall back | Audit every GVfs scheme | Safe default with native fallback |
 | Instant updates | 92% | Monitor events clear stale rows immediately; generation guards prevent old enumerations from duplicating content | Very high event storms still coalesce through one idle callback | Stress rename/move storms | Every displayed change appears immediately |

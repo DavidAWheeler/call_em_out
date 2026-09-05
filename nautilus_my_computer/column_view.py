@@ -600,6 +600,7 @@ class _ColumnViewHost:
         result_scroller.set_child(self.search_results)
         result_column.append(result_scroller)
         self.search_result_column = result_column
+        self._search_folder_columns: list[Gtk.Widget] = []
         result_column.set_visible(False)
         self.search_overlay.add_overlay(search_bar)
         self.search_overlay.add_overlay(result_column)
@@ -654,6 +655,7 @@ class _ColumnViewHost:
             self.search_entry.grab_focus()
             GLib.idle_add(self._disable_native_search_surface)
         else:
+            self._clear_search_folder_columns()
             self.search_entry.set_text("")
             self.search_result_column.set_visible(False)
 
@@ -785,8 +787,11 @@ class _ColumnViewHost:
     def _on_search_result_activated(self, _list, row) -> None:
         uri = getattr(row, "_search_uri", None)
         if uri and getattr(row, "_search_is_dir", False):
-            self.search_toggle.set_active(False)
-            self._ext._navigate_current_in_place(uri, self._win)
+            # Search folders behave like a Miller alias: keep the result
+            # column in place and reveal its real contents directly beside
+            # it instead of handing the location to Nautilus and teleporting
+            # the entire view.
+            self._show_search_folder(uri)
         elif uri:
             self._set_preview(uri, search_result=True)
             self._rebuild_chain()
@@ -845,11 +850,11 @@ class _ColumnViewHost:
         # _on_real_row_activated).
         return [self._make_real_column(self._root_uri)]
 
-    def _make_real_column(self, folder_uri: str) -> Gtk.Widget:
+    def _make_real_column(self, folder_uri: str, on_row_activated=None) -> Gtk.Widget:
         column = MyComputerColumn(
             self._ext,
             folder_uri,
-            self._on_real_row_activated,
+            on_row_activated or self._on_real_row_activated,
             on_loaded=self._on_column_loaded,
             sort=self._sort,
             on_row_pressed=self._on_row_pressed,
@@ -868,6 +873,31 @@ class _ColumnViewHost:
         column._finish_drag = self._finish_drag
         column._perform_drop = self._perform_drop_to
         return column
+
+    def _clear_search_folder_columns(self) -> None:
+        for column in self._search_folder_columns:
+            self.search_overlay.remove_overlay(column)
+            column.destroy_enumeration()
+        self._search_folder_columns.clear()
+
+    def _show_search_folder(self, uri: str) -> None:
+        self._clear_search_folder_columns()
+
+        def activate(column, row) -> None:
+            if row.is_dir:
+                self._show_search_folder(row.uri)
+            else:
+                self._set_preview(row.uri, search_result=True)
+                self._rebuild_chain()
+
+        column = self._make_real_column(uri, on_row_activated=activate)
+        column.set_halign(Gtk.Align.START)
+        column.set_valign(Gtk.Align.FILL)
+        column.set_margin_start(COLUMN_WIDTH)
+        column.set_vexpand(True)
+        self.search_overlay.add_overlay(column)
+        self._search_folder_columns.append(column)
+        column.grab_list_focus()
 
     def _prepare_drag_uri(self, uri: str) -> str:
         """Materialize a Trash item before handing it to desktop DND.
@@ -3401,11 +3431,10 @@ def _maybe_auto_elect_column_view(ext, win: Gtk.Window, slot: Gtk.Widget) -> Non
     loc = slot.get_property("location")
     if loc is None or not ext._column_view_available_at(loc):
         return
-    # Trash is a first-class Miller root in this fork even when the user has
-    # previously selected Grid/List as the general default. Its restore and
-    # permanent-delete affordances only exist in our preview column.
-    force_trash = loc.get_uri().rstrip("/") == "trash:"
-    if force_trash and ext._active_slot_widget(win) is slot:
+    # Trash and Recent are useful Miller roots even when Grid/List is the
+    # saved general default.
+    force_special_root = loc.get_uri().rstrip("/") in ("trash:", "recent:")
+    if force_special_root and ext._active_slot_widget(win) is slot:
         enter_column_view(ext, win, loc.get_uri())
         refresh_column_view_chrome(ext, win)
         return
@@ -3445,13 +3474,13 @@ def _on_slot_location_changed(slot, _pspec, ext, win: Gtk.Window) -> None:
     where it gets its real chance, on the first navigation that lands
     somewhere Column View actually supports."""
     loc = slot.get_property("location")
-    # A Trash bookmark is always handled by our Miller host, independent of
+    # Trash and Recent are handled by our Miller host, independent of
     # the user's general Grid/List preference. This is checked before the
     # normal election path because Nautilus may have just switched its native
     # stack child while processing the sidebar click.
     if (
         loc is not None
-        and loc.get_uri().rstrip("/") == "trash:"
+        and loc.get_uri().rstrip("/") in ("trash:", "recent:")
         and getattr(slot, "_mc_column_view", None) is not None
         and not slot_is_showing_column(slot)
     ):

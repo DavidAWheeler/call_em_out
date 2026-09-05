@@ -108,7 +108,6 @@ _DISKS_FILE = Gio.File.new_for_uri(DISKS_URI)
 # ordinary browsable folders and should remain supported.
 MILLER_VIEW_UNAVAILABLE_URIS = [
     DISKS_URI,
-    "recent:///",
     "starred:///",
     "x-network-view:///",
 ]

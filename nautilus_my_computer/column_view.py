@@ -778,10 +778,12 @@ class _ColumnViewHost:
         else:
             action &= offered
         target._mc_drop_action = action
+        _log(f"column drop motion offered={int(offered)} action={int(action)}")
         return action
 
     def _on_column_drop(self, target, value, x: float, y: float, column) -> bool:
         action = getattr(target, "_mc_drop_action", Gdk.DragAction(0))
+        _log(f"column drop received action={int(action)} target={column.folder_uri!r}")
         if action not in (Gdk.DragAction.COPY, Gdk.DragAction.MOVE):
             return False
         destination_uri = column.folder_uri

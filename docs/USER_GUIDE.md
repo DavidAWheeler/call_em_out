@@ -31,8 +31,9 @@ raw `trash:///` URLs.
 The search button sits directly after Back and Forward. `Ctrl+F` opens or
 closes the same header field. Results appear as a live **Search results**
 column. Enter runs the typed query without opening the first match. Folder
-results navigate into that folder; file results show a preview with **Go to
-Folder**.
+results keep the result trail visible and open their contents in adjacent
+columns; file results show a preview with **Go to Containing Folder**. Changing
+location with a bookmark, path bar, or history control closes search cleanly.
 
 The original project remains the reference for installation, upstream behavior, translations, and general architecture. Native Grid and List views remain the fallback when a behavior is not yet reliable in this fork.
 

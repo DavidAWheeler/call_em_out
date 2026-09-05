@@ -1272,7 +1272,9 @@ class MyComputerColumnRow(Gtk.Box):
         items = column.selected_items() if column is not None else []
         if not any(item.uri == self.item.uri for item in items):
             items = [self.item]
-        file_list = Gdk.FileList.new_from_list([Gio.File.new_for_uri(item.uri) for item in items])
+        prepare_uri = getattr(column, "_prepare_drag_uri", None) if column is not None else None
+        uris = [prepare_uri(item.uri) if prepare_uri is not None else item.uri for item in items]
+        file_list = Gdk.FileList.new_from_list([Gio.File.new_for_uri(uri) for uri in uris])
         # Gdk.FileList leaves action negotiation to the destination, so
         # Nautilus can honor its normal copy/move/link modifier behavior.
         value = GObject.Value()

@@ -551,6 +551,8 @@ class _ColumnViewHost:
         # of the input and results are rendered in this view for local and
         # virtual roots alike.
         self.search_overlay = Gtk.Overlay()
+        self.search_overlay.set_hexpand(True)
+        self.search_overlay.set_vexpand(True)
         self.search_overlay.set_child(scroller)
         search_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         search_bar.set_margin_start(8)
@@ -728,7 +730,30 @@ class _ColumnViewHost:
         drop.connect("drop", self._on_column_drop, column)
         column.add_controller(drop)
         column._on_files_dragged = lambda: self._watch_operation_directories([column.folder_uri])
+        column._prepare_drag_uri = self._prepare_drag_uri
         return column
+
+    def _prepare_drag_uri(self, uri: str) -> str:
+        """Materialize a Trash item before handing it to desktop DND.
+
+        Plasma and several other desktop targets reject ``trash:///`` in a
+        URI list. Restore the item to its recorded original path while the
+        drag starts, then export the ordinary file URI that every target
+        understands.
+        """
+        if not uri.startswith("trash:"):
+            return uri
+        source = Gio.File.new_for_uri(uri)
+        try:
+            info = source.query_info("trash::orig-path", Gio.FileQueryInfoFlags.NONE, None)
+            original = info.get_attribute_string("trash::orig-path")
+            if original:
+                target = Gio.File.new_for_path(original)
+                source.move(target, Gio.FileCopyFlags.NONE, None, None)
+                return target.get_uri()
+        except GLib.Error as error:
+            _log(f"Could not prepare Trash drag {uri!r}: {error.message}")
+        return uri
 
     def _on_column_drop_motion(self, target, _x: float, _y: float):
         current = target.get_current_drop()
@@ -1521,7 +1546,10 @@ class _ColumnViewHost:
             nonlocal refresh_id
             if refresh_id:
                 GLib.source_remove(refresh_id)
-            refresh_id = GLib.timeout_add(150, finish_refresh)
+            # Directory monitors already coalesce kernel events; refresh on
+            # the next main-loop turn so a successful Trash drop disappears
+            # from its source column immediately.
+            refresh_id = GLib.idle_add(finish_refresh)
 
         for directory_uri in watched:
             try:
@@ -3210,10 +3238,24 @@ def _on_slot_location_changed(slot, _pspec, ext, win: Gtk.Window) -> None:
     _do_inject_into_slot alone would never fire for most users. This is
     where it gets its real chance, on the first navigation that lands
     somewhere Column View actually supports."""
+    loc = slot.get_property("location")
+    # A Trash bookmark is always handled by our Miller host, independent of
+    # the user's general Grid/List preference. This is checked before the
+    # normal election path because Nautilus may have just switched its native
+    # stack child while processing the sidebar click.
+    if (
+        loc is not None
+        and loc.get_uri().rstrip("/") == "trash:"
+        and getattr(slot, "_mc_column_view", None) is not None
+        and not slot_is_showing_column(slot)
+    ):
+        if ext._active_slot_widget(win) is slot:
+            enter_column_view(ext, win, loc.get_uri())
+            refresh_column_view_chrome(ext, win)
+        return
     if not slot_is_showing_column(slot):
         _maybe_auto_elect_column_view(ext, win, slot)
         return
-    loc = slot.get_property("location")
     if loc is None:
         return
     if not ext._column_view_available_at(loc):

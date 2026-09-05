@@ -881,7 +881,27 @@ class _ColumnViewHost:
         self._search_folder_columns.clear()
 
     def _show_search_folder(self, uri: str) -> None:
-        self._clear_search_folder_columns()
+        target = Gio.File.new_for_uri(uri)
+        parent = target.get_parent()
+        # A result starts the branch. A child result preserves every already
+        # visible ancestor, while a sibling discards only columns to its
+        # right. This is the same "keep the trail" rule as Miller browsing.
+        parent_index = next(
+            (
+                index
+                for index, existing in enumerate(self._search_folder_columns)
+                if parent is not None and Gio.File.new_for_uri(existing.folder_uri).equal(parent)
+            ),
+            None,
+        )
+        if parent_index is None:
+            self._clear_search_folder_columns()
+        else:
+            stale = self._search_folder_columns[parent_index + 1 :]
+            for existing in stale:
+                self.search_overlay.remove_overlay(existing)
+                existing.destroy_enumeration()
+            del self._search_folder_columns[parent_index + 1 :]
 
         def activate(column, row) -> None:
             if row.is_dir:
@@ -893,7 +913,7 @@ class _ColumnViewHost:
         column = self._make_real_column(uri, on_row_activated=activate)
         column.set_halign(Gtk.Align.START)
         column.set_valign(Gtk.Align.FILL)
-        column.set_margin_start(COLUMN_WIDTH)
+        column.set_margin_start(COLUMN_WIDTH * (len(self._search_folder_columns) + 1))
         column.set_vexpand(True)
         self.search_overlay.add_overlay(column)
         self._search_folder_columns.append(column)

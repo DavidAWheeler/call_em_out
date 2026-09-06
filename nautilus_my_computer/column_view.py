@@ -2636,6 +2636,63 @@ class _ColumnViewHost:
         adjustment = self.scroller.get_hadjustment()
         adjustment.set_value(max(0, adjustment.get_value() - removed_width))
         self._rebuild_chain()
+        self._promote_containing_location()
+
+    def _promote_containing_location(self) -> None:
+        """Turn a containing-folder jump into an ordinary Miller branch.
+
+        Search/Recent columns are useful during the slide-in, but they are
+        transient context. Once the transition settles, replace them with
+        real ancestor columns so Back walks the filesystem branch rather than
+        returning to the result provider.
+        """
+        folder_uri = getattr(self, "_containing_location_uri", None)
+        if not folder_uri or getattr(self, "_transition_preview", None) is not None:
+            return
+        destination = next(
+            (column for column in reversed(self.columns)
+             if column.folder_uri.rstrip("/") == folder_uri.rstrip("/")),
+            None,
+        )
+        if destination is None:
+            return
+        try:
+            target = Gio.File.new_for_uri(folder_uri)
+            chain_uris = []
+            current = target
+            while current is not None:
+                chain_uris.append(current.get_uri())
+                current = current.get_parent()
+            chain_uris.reverse()
+            origin = getattr(self, "_search_origin_uri", "")
+            if origin.startswith("file://"):
+                origin_file = Gio.File.new_for_uri(origin)
+                origin_path = origin_file.get_path()
+                target_path = target.get_path()
+                if origin_path and target_path and target_path.startswith(origin_path.rstrip("/") + "/"):
+                    chain_uris = chain_uris[chain_uris.index(origin):]
+            if len(chain_uris) > 1:
+                chain_uris = chain_uris[:-1]
+            ancestor_columns = [self._make_real_column(uri) for uri in chain_uris]
+        except (GLib.Error, ValueError):
+            return
+
+        self._detach_root()
+        for column in self.columns:
+            if column is not destination:
+                column.destroy_enumeration()
+        self.columns = [*ancestor_columns, destination]
+        self.search_result_column = None
+        self._retained_navigation = True
+        self._history_index = len(self.columns) - 1
+        self.focused_index = self._history_index
+        self._containing_location_uri = None
+        self._pending_reveal_uri = None
+        self._root_uri = self.columns[0].folder_uri
+        self._reset_viewport_width()
+        self._rebuild_chain()
+        self._apply_focused_column_style()
+        self._align_to_viewport_pos(destination, 24)
 
     def _rebuild_chain(self) -> None:
         old_root = getattr(self, "root", None)

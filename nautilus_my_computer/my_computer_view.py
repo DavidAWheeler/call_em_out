@@ -1896,7 +1896,7 @@ def _populate_slot(ext, slot, sort: tuple[str, bool] | None = None) -> None:
             section = MyComputerCardGroup(
                 ext,
                 win,
-                _("Preferred Folders"),
+                _("Pinned folders"),
                 ext._view_mode,
                 max_cols=_FOLDER_FLOW_COLS_GRID,
                 col_spacing=_FOLDER_CARD_SPACING,

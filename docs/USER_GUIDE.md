@@ -44,6 +44,10 @@ it does not cover the results or their children. **Go to Containing Folder**
 opens the directory and selects the file. The same button works in Recent,
 whose entries resolve to their actual file locations.
 
+Plain-text files show a bounded, read-only excerpt. Images and document
+thumbnails use a modest 1280-pixel cap so they are easier to inspect without
+turning an older CPU into a space heater.
+
 The original project remains the reference for installation, upstream behavior, translations, and general architecture. Native Grid and List views remain the fallback when a behavior is not yet reliable in this fork.
 
 ## Shortcuts and interaction
@@ -57,6 +61,10 @@ off to the right, with a small on-deck sliver visible. In Search and Recent,
 Back first walks the open result columns before leaving that special root.
 Clicking a bookmark hard-resets stale horizontal scroll before loading the new
 location.
+
+The **Pinned folders** group can be reordered by dragging its cards. Physical
+drives and partitions retain Nautilus's native order because it does not expose
+a stable user-order API for them.
 
 ## Known limits
 

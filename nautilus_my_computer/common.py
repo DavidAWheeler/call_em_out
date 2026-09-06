@@ -847,8 +847,8 @@ _COLUMN_ROW_ICON_SIZE = (
 )
 _COLUMN_ROW_SPACING = 8  # column view: gap (px) between a row's icon/label/chevron
 _COLUMN_PREVIEW_WIDTH = 400  # column view: default preview column width (px)
-_COLUMN_PREVIEW_IMAGE_SIZE = 1024  # preview lookup size (px); big enough for scalable variant
-_COLUMN_PREVIEW_IMAGE_MAX_WIDTH = 1024  # max preview image width (px); larger images scaled to fit
+_COLUMN_PREVIEW_IMAGE_SIZE = 1280  # modest upscale for readable PDF/image thumbnails
+_COLUMN_PREVIEW_IMAGE_MAX_WIDTH = 1280  # cap avoids full-resolution CPU/memory cost
 
 _INTERNAL_FSTYPES = {"gvfs", "unmounted", "network-place"}
 

@@ -434,6 +434,14 @@ def _apply_native_place_visibility(
             visible = want_visible[uri]
             if row.get_visible() != visible:
                 row.set_visible(visible)
+            # These are Nautilus's built-in locations above the bookmark
+            # boundary. Their generic “Open …” tooltips add no information;
+            # bookmark rows below the boundary retain their useful path text.
+            try:
+                row.set_tooltip_text(None)
+                row.set_has_tooltip(False)
+            except (AttributeError, TypeError):
+                pass
             if visible:
                 any_place_visible = True
             else:
@@ -1909,7 +1917,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         _folders_vis_labels = [_("Visible"), _("Hidden")]
 
         folders_combo = Adw.ComboRow()
-        folders_combo.set_title(_("Preferred Folders"))
+        folders_combo.set_title(_("Pinned folders"))
         folders_combo.set_model(Gtk.StringList.new(_folders_vis_labels))
         current_folders_vis = self._gsettings.get_string("visibility-preferred-folders")
         folders_combo.set_selected(
@@ -2412,7 +2420,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         # Only the Computer row is built here (it has no native equivalent). Every
         # other place stays native; we just toggle its native row's visibility.
         row_label = entry.label
-        row_tooltip = entry.tooltip
+        # Computer is part of the upper built-in places group; keep that row
+        # quiet while preserving path tooltips on the bookmark group below.
+        row_tooltip = None
         icon_name = self._get_computer_icon() if entry.uri == DISKS_URI else entry.icon
 
         # Instantiate the native row directly from Nautilus's GObject type system.

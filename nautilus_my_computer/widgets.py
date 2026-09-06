@@ -2663,7 +2663,8 @@ class MyComputerPreviewColumn(Gtk.Box):
     file details. Always the permanent rightmost column in the chain (see
     column_view.py's populate_column_view / _on_row_activated, which always
     (re)append one after any truncate). file_uri is None for its empty state.
-    Real file preview (text, ...) is a later iteration."""
+    Text files and images use lightweight previews; other formats retain the
+    file icon/thumbnail fallback."""
 
     __gtype_name__ = "MyComputerPreviewColumn"
 
@@ -2786,7 +2787,19 @@ class MyComputerPreviewColumn(Gtk.Box):
         # Reserved semantic pages keep the preview API ready for dedicated
         # video and document renderers without changing its layout contract.
         self._preview_stack.add_named(Gtk.Box(), PREVIEW_SLOT_VIDEO)
-        self._preview_stack.add_named(Gtk.Box(), PREVIEW_SLOT_DOCUMENT)
+        self._text_preview = Gtk.TextView()
+        self._text_preview.set_editable(False)
+        self._text_preview.set_cursor_visible(False)
+        self._text_preview.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self._text_preview.set_monospace(True)
+        self._text_preview.set_margin_start(12)
+        self._text_preview.set_margin_end(12)
+        self._text_preview.set_margin_top(12)
+        self._text_preview.set_margin_bottom(12)
+        text_scroll = Gtk.ScrolledWindow()
+        text_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        text_scroll.set_child(self._text_preview)
+        self._preview_stack.add_named(text_scroll, PREVIEW_SLOT_DOCUMENT)
         # Start on the image surface itself. It is blank until a paintable is
         # ready, which avoids both an icon flash and a loading indicator for
         # the common image-preview path. The loading slot remains available
@@ -2953,10 +2966,30 @@ class MyComputerPreviewColumn(Gtk.Box):
             # The image page is already visible and fills in as soon as its
             # decoded paintable arrives, with no interim icon or spinner.
             self._load_preview_image()
+        elif content_type and content_type.startswith("text/"):
+            self._load_text_preview()
+            self.set_preview_slot(PREVIEW_SLOT_DOCUMENT)
         else:
             self.set_preview_slot(PREVIEW_SLOT_ICON)
         self._maybe_load_thumbnail(content_type, mtime)
         self._maybe_load_dimensions(content_type)
+
+    def _load_text_preview(self) -> None:
+        """Load a bounded UTF-8/plain-text excerpt without blocking GTK."""
+        path = Gio.File.new_for_uri(self.file_uri).get_path()
+        if path is None:
+            return
+
+        def worker() -> None:
+            try:
+                with open(path, "rb") as stream:
+                    sample = stream.read(128 * 1024)
+                text = sample.decode("utf-8", errors="replace")
+            except OSError:
+                return
+            GLib.idle_add(self._text_preview.get_buffer().set_text, text)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _restore_trash_item(self, _button) -> None:
         if self.file_uri and hasattr(self._ext, "_restore_trash_uri"):

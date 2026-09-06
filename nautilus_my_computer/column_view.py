@@ -2067,6 +2067,14 @@ class _ColumnViewHost:
             else:
                 # File -> update the preview only, no new column. Same
                 # already-visible check, against the preview's own width.
+                # A file selection ends navigation at this column. Drop any
+                # deeper folder columns that belonged to the previous path;
+                # leaving them mounted puts unrelated contents between the
+                # selected file and its preview and can hide the selection
+                # behind the sidebar after the horizontal scroll settles.
+                for stale_column in stale:
+                    stale_column.destroy_enumeration()
+                del self.columns[index + 1 :]
                 fits = self._new_content_fits(PREVIEW_WIDTH)
                 self._set_preview(row.uri)
                 preview_replaced = True

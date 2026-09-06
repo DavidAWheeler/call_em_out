@@ -1028,6 +1028,55 @@ class _ColumnViewHost:
             # attached to a newly selected row (or vice versa).
             self._set_preview(preview_state[0])
 
+    def _remember_committed_drag_state(self) -> None:
+        """Keep a stable selection/preview baseline for drag cancellation.
+
+        A Gtk.DragSource can begin before the row GestureClick receives its
+        press, so a per-row snapshot is not guaranteed to exist. The Miller
+        host therefore records state whenever it commits its path highlights.
+        """
+        state = []
+        for column in self.columns:
+            selected = [item.uri for item in column.selected_items()]
+            cursor = column.selected_item()
+            anchor = (
+                column._store.get_item(column._selection_anchor)
+                if column._selection_anchor is not None
+                and 0 <= column._selection_anchor < column._store.get_n_items()
+                else None
+            )
+            state.append(
+                (
+                    column,
+                    selected,
+                    cursor.uri if cursor is not None else None,
+                    anchor.uri if anchor is not None else None,
+                )
+            )
+        self._committed_drag_state = (
+            state,
+            getattr(getattr(self, "preview_column", None), "file_uri", None),
+        )
+
+    def _restore_committed_drag_state(self) -> None:
+        baseline = getattr(self, "_committed_drag_state", None)
+        if not baseline:
+            return
+        columns_state, preview_uri = baseline
+        for column, uris, cursor_uri, anchor_uri in columns_state:
+            if column not in self.columns:
+                continue
+            column.clear_selection()
+            for uri in uris:
+                index = column._index_for_uri(uri)
+                if index is not None:
+                    column._selection.select_item(index, False)
+            column._cursor_index = column._index_for_uri(cursor_uri) if cursor_uri else None
+            column._selection_anchor = column._index_for_uri(anchor_uri) if anchor_uri else None
+        self._sync_column_selections()
+        self._apply_focused_column_style()
+        self._set_preview(preview_uri)
+
     def _perform_drop_to(self, value, destination_uri: str, action) -> bool:
         if destination_uri.startswith(("column-search:", "recent:")):
             return False
@@ -2286,6 +2335,7 @@ class _ColumnViewHost:
                 col.select_child_for_uri(self.preview_column.file_uri)
             else:
                 col.clear_selection()
+        self._remember_committed_drag_state()
 
     def _apply_focused_column_style(self) -> None:
         """Mark exactly self.columns[self.focused_index] as *the* column

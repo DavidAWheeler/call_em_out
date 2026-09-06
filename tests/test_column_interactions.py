@@ -195,6 +195,18 @@ class ColumnInteractions(unittest.TestCase):
         self.assertEqual(parent.selected_item().uri, "file:///tmp/Downloads")
         self.assertEqual(parent.selected_items(), [parent.selected_item()])
 
+    def test_committed_drag_baseline_restores_without_row_snapshot(self):
+        host = _ColumnViewHost.__new__(_ColumnViewHost)
+        host.columns = [self.column]
+        host.preview_column = SimpleNamespace(file_uri="file:///tmp/1")
+        host._apply_focused_column_style = Mock()
+        host._set_preview = Mock()
+        self.column.select_index(1)
+        host._sync_column_selections()
+        self.column.select_index(4)
+        host._restore_committed_drag_state()
+        self.assertEqual(self.column.selected_item().uri, "file:///tmp/1")
+
     def test_modifier_click_moves_keyboard_focus_to_its_column(self):
         host = SimpleNamespace(
             _cancel_row_commit=Mock(),

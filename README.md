@@ -2,11 +2,23 @@
 
 `call_em_out` is a ramshackle attempt to improve the Column View work started by the person who made the plugin we forked: [My Computer for Nautilus](https://github.com/yannmasoch/nautilus-my-computer). The original author deserves credit for the extension, its Computer view, and the Column View foundation. This is a personal set of usability experiments on top of that work.
 
+```text
+       _/\/\_
+     _/ /  \ \_
+    |  |  |  | \
+    |  |  |  |_/
+    |  |  |  |
+  __|__|__|__|__
+ /______________\
+```
+
 ## Install
 
-Clone this fork, enter its folder, and run:
+Copy and paste:
 
 ```sh
+git clone https://github.com/DavidAWheeler/call_em_out.git
+cd call_em_out
 ./install.sh
 nautilus --quit
 ```
@@ -27,8 +39,9 @@ Open Files again. The installer puts the extension in your user data directory; 
 - A real Trash Column View with metadata, Restore, Delete Permanently, and
   destination-aware drag-out.
 - Header search with live Column View results and file-result previews.
-- Plain-text and config/code previews with the filename above a bordered
-  document surface, readable PDF thumbnails, and full-path location details.
+- Plain-text, config/code, and safe reader-style HTML previews with the
+  filename above a bordered document surface, readable PDF thumbnails, and
+  full-path location details.
 - Sliding Back navigation, including Back inside Search, keeps the next
   column peeking on deck; bookmark jumps reset stale scroll, and resizing
   reveals hidden columns before stretching the preview.

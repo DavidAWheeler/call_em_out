@@ -12,6 +12,7 @@ import collections
 import dataclasses
 import math
 import threading
+from html.parser import HTMLParser
 
 import cairo
 import gi
@@ -64,6 +65,98 @@ _row_thumbnail_texture_cache: collections.OrderedDict[tuple[str, int], Gdk.Textu
     collections.OrderedDict()
 )
 _row_thumbnail_texture_cache_lock = threading.Lock()
+
+
+class _HTMLReaderParser(HTMLParser):
+    """Turn untrusted HTML into a small, non-networked reader document."""
+
+    _BLOCKS = {"article", "aside", "blockquote", "div", "footer", "header", "main", "p", "section"}
+    _SKIP = {"head", "script", "style", "svg", "template"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.runs: list[tuple[str, str]] = []
+        self._skip_depth = 0
+        self._styles: list[str] = []
+        self._line_start = True
+
+    def _newline(self, count: int = 1) -> None:
+        if not self.runs:
+            return
+        tail = "".join(text for _style, text in self.runs[-2:])
+        have = len(tail) - len(tail.rstrip("\n"))
+        if have < count:
+            self.runs.append(("body", "\n" * (count - have)))
+        self._line_start = True
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        tag = tag.casefold()
+        if tag in self._SKIP:
+            self._skip_depth += 1
+            return
+        if self._skip_depth:
+            return
+        if tag in self._BLOCKS:
+            self._newline(2)
+        elif tag == "br":
+            self._newline()
+        elif tag == "li":
+            self._newline()
+            self.runs.append(("body", "• "))
+            self._line_start = False
+        elif tag == "hr":
+            self._newline(2)
+            self.runs.append(("body", "────────"))
+            self._newline(2)
+        if tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+            self._newline(2)
+            self._styles.append(tag)
+        elif tag in {"strong", "b"}:
+            self._styles.append("strong")
+        elif tag in {"em", "i"}:
+            self._styles.append("emphasis")
+        elif tag in {"code", "pre"}:
+            if tag == "pre":
+                self._newline(2)
+            self._styles.append("code")
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.casefold()
+        if tag in self._SKIP:
+            self._skip_depth = max(0, self._skip_depth - 1)
+            return
+        if self._skip_depth:
+            return
+        mapped = (
+            "strong" if tag in {"strong", "b"}
+            else "emphasis" if tag in {"em", "i"}
+            else "code" if tag in {"code", "pre"}
+            else tag
+        )
+        if mapped in self._styles:
+            self._styles.remove(mapped)
+        if tag in self._BLOCKS or tag in {"li", "pre"}:
+            self._newline(2 if tag in self._BLOCKS else 1)
+        elif tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+            self._newline(2)
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth or not data:
+            return
+        style = self._styles[-1] if self._styles else "body"
+        text = data if style == "code" else " ".join(data.split())
+        if (
+            style != "code"
+            and text
+            and text[0] not in ".,;:!?)]}"
+            and not self._line_start
+            and self.runs
+            and not self.runs[-1][1].endswith((" ", "\n"))
+        ):
+            text = " " + text
+        if text:
+            self.runs.append((style, text))
+            self._line_start = text.endswith("\n")
 
 
 def _get_row_thumbnail_texture(uri: str, mtime: int) -> Gdk.Texture | None:
@@ -1308,6 +1401,11 @@ class MyComputerColumnRow(Gtk.Box):
         finish = getattr(column, "_finish_drag", None) if column is not None else None
         if finish is not None:
             finish(bool(delete_data))
+        if not delete_data and column is not None:
+            restore = getattr(column, "_restore_drag_selection", None)
+            if restore is not None:
+                restore(getattr(self, "_mc_drag_selection_snapshot", None))
+        self._mc_drag_selection_snapshot = None
 
     @property
     def uri(self) -> str | None:
@@ -2712,6 +2810,7 @@ class MyComputerPreviewColumn(Gtk.Box):
         self._name_lbl.set_halign(Gtk.Align.FILL)
         self._name_lbl.set_hexpand(True)
         self._name_lbl.get_style_context().add_class("heading")
+        self._name_lbl.add_css_class("mc-preview-title")
         self.append(self._name_lbl)
 
         # The outer widget is the fixed-height split. The first child is the
@@ -2984,7 +3083,11 @@ class MyComputerPreviewColumn(Gtk.Box):
             # decoded paintable arrives, with no interim icon or spinner.
             self._load_preview_image()
         elif self._is_text_preview_type(content_type, gfile.get_basename()):
-            self._load_text_preview()
+            if self._is_html_preview_type(content_type, gfile.get_basename()):
+                self._load_html_preview()
+            else:
+                self._text_preview.set_monospace(True)
+                self._load_text_preview()
             self.set_preview_slot(PREVIEW_SLOT_DOCUMENT)
         else:
             self.set_preview_slot(PREVIEW_SLOT_ICON)
@@ -3008,6 +3111,57 @@ class MyComputerPreviewColumn(Gtk.Box):
             GLib.idle_add(self._text_preview.get_buffer().set_text, text)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _load_html_preview(self) -> None:
+        """Render a bounded reader view without scripts or subresources."""
+        path = Gio.File.new_for_uri(self.file_uri).get_path()
+        if path is None:
+            return
+
+        def worker() -> None:
+            try:
+                with open(path, "rb") as stream:
+                    source = stream.read(256 * 1024).decode("utf-8", errors="replace")
+                parser = _HTMLReaderParser()
+                parser.feed(source)
+                parser.close()
+            except (OSError, ValueError):
+                return
+            GLib.idle_add(self._apply_html_preview, parser.runs)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_html_preview(self, runs: list[tuple[str, str]]) -> bool:
+        if self._cancellable.is_cancelled():
+            return GLib.SOURCE_REMOVE
+        self._text_preview.set_monospace(False)
+        buffer = self._text_preview.get_buffer()
+        buffer.set_text("")
+        tags = {
+            "h1": buffer.create_tag("html-h1", weight=Pango.Weight.BOLD, scale=1.50),
+            "h2": buffer.create_tag("html-h2", weight=Pango.Weight.BOLD, scale=1.30),
+            "h3": buffer.create_tag("html-h3", weight=Pango.Weight.BOLD, scale=1.16),
+            "h4": buffer.create_tag("html-h4", weight=Pango.Weight.BOLD),
+            "h5": buffer.create_tag("html-h5", weight=Pango.Weight.BOLD),
+            "h6": buffer.create_tag("html-h6", weight=Pango.Weight.BOLD),
+            "strong": buffer.create_tag("html-strong", weight=Pango.Weight.BOLD),
+            "emphasis": buffer.create_tag("html-emphasis", style=Pango.Style.ITALIC),
+            "code": buffer.create_tag("html-code", family="monospace"),
+        }
+        for style, text in runs:
+            end = buffer.get_end_iter()
+            tag = tags.get(style)
+            if tag is None:
+                buffer.insert(end, text)
+            else:
+                buffer.insert_with_tags(end, text, tag)
+        return GLib.SOURCE_REMOVE
+
+    @staticmethod
+    def _is_html_preview_type(content_type: str | None, basename: str | None) -> bool:
+        return content_type in {"text/html", "application/xhtml+xml"} or bool(
+            basename and basename.casefold().endswith((".html", ".htm", ".xhtml"))
+        )
 
     @staticmethod
     def _is_text_preview_type(content_type: str | None, basename: str | None) -> bool:

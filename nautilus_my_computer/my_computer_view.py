@@ -573,13 +573,17 @@ _CSS = b"""
 .mc-preview-column {
     padding: 12px;
 }
+.mc-preview-title {
+    font-size: 1.28em;
+    font-weight: 700;
+}
 /* Preview metadata is read from the trailing pane at a distance.  Keep it
    comfortably larger than list-row captions in both dark and light themes. */
 .mc-preview-details label {
     font-size: 1.12em;
 }
 .mc-preview-details .caption {
-    font-size: 1em;
+    font-size: 1.06em;
 }
 .mc-preview-details button {
     min-height: 34px;
@@ -1179,6 +1183,11 @@ def _do_inject_into_slot(ext, win: Gtk.Window, slot: Gtk.Widget) -> bool:
     loc = slot.get_property("location")
     if loc is not None and loc.equal(_DISKS_FILE):
         _enter_panel(ext, win, slot)
+        # Cold startup can commit computer:/// before this slot watcher is
+        # connected, so no later notify::location exists to align the shared
+        # sidebar/pathbar. Use the same bounded exact-slot settle as navigation.
+        for delay in (0, 150, 500):
+            GLib.timeout_add(delay, ext._sync_computer_chrome_for_slot, win, slot)
     return GLib.SOURCE_REMOVE
 
 
@@ -1225,8 +1234,21 @@ def _on_slot_location_changed(slot, _pspec, ext, win: Gtk.Window) -> None:
     if at_disks:
         if not showing:
             _enter_panel(ext, win, slot)
+            # This per-slot callback runs after Nautilus's own location work,
+            # while its earlier window-level signal may already be over. Give
+            # shared chrome a few bounded settle passes using this exact slot;
+            # private active-slot discovery is unreliable during cold mapping.
+            for delay in (0, 150, 500):
+                GLib.timeout_add(delay, ext._sync_computer_chrome_for_slot, win, slot)
     elif showing:
         _leave_panel(ext, win, slot)
+
+
+def reconcile_slot(ext, win: Gtk.Window, slot: Gtk.Widget | None) -> bool:
+    """Make a settled slot URI authoritative after navigation callbacks race."""
+    if slot is not None and getattr(slot, "_mc_computer", None) is not None:
+        _on_slot_location_changed(slot, None, ext, win)
+    return GLib.SOURCE_REMOVE
 
 
 def _unselect_all_cards(state: dict) -> None:

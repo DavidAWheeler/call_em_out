@@ -995,6 +995,34 @@ class _ColumnViewHost:
             picked = picked.get_parent()
         return _ColumnViewHost._perform_drop_to(self, value, destination_uri, action)
 
+    def _restore_drag_selection(self, snapshot) -> None:
+        """Restore the pointer selection when a drag ends without a drop."""
+        if not snapshot:
+            return
+        column, uris, cursor_uri, anchor_uri = snapshot
+        if column not in self.columns:
+            return
+        column.clear_selection()
+        for uri in uris:
+            index = column._index_for_uri(uri)
+            if index is not None:
+                column._selection.select_item(index, False)
+        # Snapshots store URIs so they survive a model refresh; accept the
+        # historical integer form as a fallback for callers outside the row
+        # gesture path.
+        column._cursor_index = (
+            cursor_uri
+            if isinstance(cursor_uri, int)
+            else column._index_for_uri(cursor_uri) if cursor_uri else None
+        )
+        column._selection_anchor = (
+            anchor_uri
+            if isinstance(anchor_uri, int)
+            else column._index_for_uri(anchor_uri) if anchor_uri else None
+        )
+        self._sync_column_selections()
+        self._apply_focused_column_style()
+
     def _perform_drop_to(self, value, destination_uri: str, action) -> bool:
         if destination_uri.startswith(("column-search:", "recent:")):
             return False
@@ -1297,6 +1325,16 @@ class _ColumnViewHost:
             modifiers = gesture.get_current_event_state()
             ctrl = bool(modifiers & Gdk.ModifierType.CONTROL_MASK)
             shift = bool(modifiers & Gdk.ModifierType.SHIFT_MASK)
+            cursor_item = column.selected_item()
+            anchor_item = None
+            if column._selection_anchor is not None and 0 <= column._selection_anchor < column._store.get_n_items():
+                anchor_item = column._store.get_item(column._selection_anchor)
+            row._mc_drag_selection_snapshot = (
+                column,
+                [item.uri for item in column.selected_items()],
+                cursor_item.uri if cursor_item is not None else None,
+                anchor_item.uri if anchor_item is not None else None,
+            )
             if ctrl or shift:
                 self.focused_index = self.columns.index(column)
                 self._apply_focused_column_style()

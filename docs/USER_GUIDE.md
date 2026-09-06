@@ -45,11 +45,12 @@ opens the directory and selects the file. The same button works in Recent,
 whose entries resolve to their actual file locations.
 
 Plain-text, configuration, and common code files show a bounded, read-only
-excerpt. PDF thumbnails request GNOME's 1024-pixel tier; direct image previews
-are capped at 1280 pixels. The filename sits above a bordered preview surface;
-type and size follow it, while **Go to Containing Folder** remains at the
-bottom. Search and Recent previews show the selected file's full path in a
-selectable **Location** row.
+excerpt. HTML gets a safe reader view with headings, emphasis, lists, and code;
+scripts, styles, and remote resources are never loaded. PDF thumbnails request
+GNOME's 1024-pixel tier; direct image previews are capped at 1280 pixels. The
+larger filename sits above a bordered preview surface; type and size follow it,
+while **Go to Containing Folder** remains at the bottom. Search and Recent
+previews show the selected file's full path in a selectable **Location** row.
 
 The original project remains the reference for installation, upstream behavior, translations, and general architecture. Native Grid and List views remain the fallback when a behavior is not yet reliable in this fork.
 
@@ -65,6 +66,11 @@ Back first walks the open result columns before leaving that special root.
 Clicking a bookmark hard-resets stale horizontal scroll before loading the new
 location. Its destination becomes the first column instead of being treated as
 a child of whichever column happened to be open.
+
+Pressing Esc or ending a drag over an invalid target cancels the operation and
+restores the pre-drag selection. The preview and focused column stay paired
+with the same committed item instead of showing a newly highlighted row with
+stale details.
 
 The **Pinned folders** group can be reordered by dragging its cards. Drive and
 partition cards have **Move Earlier**, **Move Later**, and **Reset Drive Order**

@@ -976,12 +976,38 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             if sidebar_row.get_parent() is not my_computer_listbox:
                 return GLib.SOURCE_REMOVE
             if selected:
+                sidebar_row.set_selectable(True)
                 if my_computer_listbox.get_selected_row() is not sidebar_row:
                     my_computer_listbox.select_row(sidebar_row)
+                native_listbox = state.get("sidebar_listbox")
+                if native_listbox is not None:
+                    native_listbox.unselect_all()
             elif my_computer_listbox.get_selected_row() is sidebar_row:
                 my_computer_listbox.unselect_all()
         except Exception:
             pass
+        return GLib.SOURCE_REMOVE
+
+    def _sync_computer_chrome_for_slot(self, win: Gtk.Window, slot: Gtk.Widget) -> bool:
+        """Align shared chrome after the exact visible slot elects Computer."""
+        state = self._windows.get(win)
+        panel_state = getattr(slot, "_mc_computer", None)
+        if state is None or panel_state is None or not slot.get_mapped():
+            return GLib.SOURCE_REMOVE
+        try:
+            location = slot.get_property("location")
+        except TypeError:
+            return GLib.SOURCE_REMOVE
+        if location is None or not location.equal(_DISKS_FILE):
+            # The slot was computer:/// when injected, then Nautilus completed
+            # its cold Home restore without delivering our later watcher. Hide
+            # the now-stale panel instead of painting Computer under Home chrome.
+            my_computer_view.reconcile_slot(self, win, slot)
+            return GLib.SOURCE_REMOVE
+        self._set_computer_sidebar_selected(state, True)
+        if DEBUG_PATHBAR_ACTIVE:
+            self._fix_pathbar_icon(win)
+        state["_chrome_in_view"] = True
         return GLib.SOURCE_REMOVE
 
     def _on_settings_changed(self, settings: Gio.Settings, key: str) -> None:
@@ -2920,7 +2946,11 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         for the chip, and a leading "/" separator label is shown before it. In
         that case there is no existing image to pin, so one is created and
         prepended, and the stray separator is hidden."""
-        target_labels = {COMPUTER_LABEL, _LOCATION_TITLE}
+        # During the cold start redirect Nautilus can retain its just-built
+        # Home chip even after the slot commits computer:///. This function is
+        # called only while that URI is active, so that stale label is safe to
+        # repair alongside the icon.
+        target_labels = {COMPUTER_LABEL, _LOCATION_TITLE, _HOME_TITLE}
 
         for w in _all_widgets(win):
             if not isinstance(w, Gtk.Label):
@@ -2949,6 +2979,9 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                 ancestor = ancestor.get_parent()
             if in_sidebar:
                 continue
+
+            if label_text.strip() != COMPUTER_LABEL:
+                w.set_label(COMPUTER_LABEL)
 
             # Walk up to the chip container
             container = w.get_parent()

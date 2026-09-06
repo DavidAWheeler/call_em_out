@@ -16,6 +16,7 @@ from nautilus_my_computer.widgets import (
     MyComputerColumn,
     MyComputerColumnRow,
     MyComputerPreviewColumn,
+    _HTMLReaderParser,
     _ColumnRowItem,
 )
 
@@ -37,6 +38,22 @@ class ColumnInteractions(unittest.TestCase):
         self.assertTrue(detect("application/octet-stream", "theme.kdl"))
         self.assertTrue(detect("application/json", "settings.data"))
         self.assertFalse(detect("application/pdf", "document.pdf"))
+
+    def test_html_reader_preserves_structure_and_discards_active_content(self):
+        parser = _HTMLReaderParser()
+        parser.feed(
+            "<head><style>bad</style></head><h1>Heading</h1><p>Hello "
+            "<strong>reader</strong>.</p><ul><li>One</li><li>Two</li></ul>"
+            "<script>also_bad()</script>"
+        )
+        rendered = "".join(text for _style, text in parser.runs)
+        self.assertIn("Heading", rendered)
+        self.assertIn("Hello reader.", rendered)
+        self.assertIn("• One", rendered)
+        self.assertNotIn("bad", rendered)
+        self.assertEqual(
+            MyComputerPreviewColumn._is_html_preview_type("text/html", "index.html"), True
+        )
 
     def test_control_drop_requests_copy_for_combined_offer(self):
         device = Mock()
@@ -143,6 +160,18 @@ class ColumnInteractions(unittest.TestCase):
         _ColumnViewHost._on_row_pressed(host, gesture, 1, 1, 1, self.column, row)
         self.assertEqual(self.selected(), ["0", "2"])
         gesture.set_state.assert_not_called()
+
+    def test_cancelled_drag_restores_previous_selection(self):
+        host = _ColumnViewHost.__new__(_ColumnViewHost)
+        host.columns = [self.column]
+        host._sync_column_selections = Mock()
+        host._apply_focused_column_style = Mock()
+        self.column.select_index(1)
+        snapshot = (self.column, ["file:///tmp/1"], "file:///tmp/1", 1)
+        self.column.select_index(4)
+        host._restore_drag_selection(snapshot)
+        self.assertEqual(self.column.selected_item().uri, "file:///tmp/1")
+        host._sync_column_selections.assert_called_once_with()
 
     def test_modifier_click_moves_keyboard_focus_to_its_column(self):
         host = SimpleNamespace(

@@ -46,9 +46,10 @@ whose entries resolve to their actual file locations.
 
 Plain-text, configuration, and common code files show a bounded, read-only
 excerpt. PDF thumbnails request GNOME's 1024-pixel tier; direct image previews
-are capped at 1280 pixels, improving legibility without decoding an unlimited
-source image. Search and Recent previews also show the selected file's full
-path in a selectable **Location** row.
+are capped at 1280 pixels. The filename sits above a bordered preview surface;
+type and size follow it, while **Go to Containing Folder** remains at the
+bottom. Search and Recent previews show the selected file's full path in a
+selectable **Location** row.
 
 The original project remains the reference for installation, upstream behavior, translations, and general architecture. Native Grid and List views remain the fallback when a behavior is not yet reliable in this fork.
 
@@ -62,7 +63,8 @@ the viewport left one column at a time and leaves the deeper branch mounted
 off to the right, with a small on-deck sliver visible. In Search and Recent,
 Back first walks the open result columns before leaving that special root.
 Clicking a bookmark hard-resets stale horizontal scroll before loading the new
-location.
+location. Its destination becomes the first column instead of being treated as
+a child of whichever column happened to be open.
 
 The **Pinned folders** group can be reordered by dragging its cards. Drive and
 partition cards have **Move Earlier**, **Move Later**, and **Reset Drive Order**
@@ -72,7 +74,8 @@ actions in their context menus.
 
 Search hides dotfiles and other hidden entries unless Nautilus's Show Hidden
 Files setting is enabled. An empty search offers **Include Hidden Files** for
-that query. Search intentionally stops after four directory levels or 200 matches. A
+that single query; a later identical search asks again. Search intentionally
+stops after four directory levels or 200 matches. A
 Trash drag is materialized when the drag begins, so cancelling a drag can leave
 the item in the extension's user cache rather than in Trash; successful drops
 move it to the requested destination. Link creation is not offered by Column

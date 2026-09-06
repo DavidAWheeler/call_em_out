@@ -27,11 +27,13 @@ Open Files again. The installer puts the extension in your user data directory; 
 - A real Trash Column View with metadata, Restore, Delete Permanently, and
   destination-aware drag-out.
 - Header search with live Column View results and file-result previews.
-- Plain-text and config/code previews, readable PDF thumbnails, and full-path
-  location details in Search and Recent previews.
+- Plain-text and config/code previews with the filename above a bordered
+  document surface, readable PDF thumbnails, and full-path location details.
 - Sliding Back navigation, including Back inside Search, keeps the next
   column peeking on deck; bookmark jumps reset stale scroll, and resizing
   reveals hidden columns before stretching the preview.
+- Sidebar bookmarks always become the first Column View column, including a
+  repeated click on the current location.
 
 The fork does not replace Nautilus or claim to be a new file manager. It keeps
 native Grid and List views available.

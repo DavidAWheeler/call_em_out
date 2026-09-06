@@ -479,6 +479,9 @@ class _ColumnViewHost:
         # late location-change echo can steal GTK focus after the bounded
         # frame retry has ended, so remember which echo should restore it.
         self._pending_focus_uri: str | None = None
+        # Only location changes initiated by a Miller row may extend/truncate
+        # the current chain. Sidebar/path/history navigation must re-root.
+        self._expected_slot_uri: str | None = None
 
         scroller = Gtk.ScrolledWindow()
         # Vertical NEVER makes this scroller's height follow the canvas's
@@ -631,6 +634,7 @@ class _ColumnViewHost:
             GLib.idle_add(self._disable_native_search_surface)
         else:
             self._search_generation = getattr(self, "_search_generation", 0) + 1
+            self._search_include_hidden_query = None
             self.search_entry.set_text("")
             if self.search_result_column is not None and not getattr(self, "_preserve_search_chain", False):
                 self.search_result_column = None
@@ -684,10 +688,9 @@ class _ColumnViewHost:
         self.search_result_column._empty_page.set_description(None)
         self.search_result_column._empty_page.set_child(None)
         self.search_result_column._show_empty_page(True)
-        include_hidden = (
-            self._ext._nautilus_prefs.hidden_files()
-            or self._search_include_hidden_query == query
-        )
+        one_shot_hidden = self._search_include_hidden_query == query
+        self._search_include_hidden_query = None
+        include_hidden = self._ext._nautilus_prefs.hidden_files() or one_shot_hidden
 
         def worker():
             found = []
@@ -802,6 +805,7 @@ class _ColumnViewHost:
         self.focused_index = 0
         self._pending_child_focus = None
         self._pending_focus_uri = None
+        self._expected_slot_uri = None
         self._apply_focused_column_style()
         self._rebuild_chain()
 
@@ -2030,9 +2034,11 @@ class _ColumnViewHost:
             return
         if restore_keyboard_focus:
             self._pending_focus_uri = uri
+        self._expected_slot_uri = uri
         try:
             self._win.activate_action("slot.open-location", GLib.Variant("s", uri))
         except Exception as e:
+            self._expected_slot_uri = None
             if restore_keyboard_focus:
                 self._pending_focus_uri = None
             _log(f"_sync_slot_location failed for {uri!r}: {e}")
@@ -2048,6 +2054,7 @@ class _ColumnViewHost:
             # This deliberate jump may target a directory that already
             # exists earlier in the retained trail. Its native location
             # echo must not select that old copy and cancel the slide-in.
+            self._expected_slot_uri = None
             return
         # A sidebar/path-bar/history location change supersedes a visible
         # search. Without this, the search overlay survived a Computer click
@@ -2092,6 +2099,11 @@ class _ColumnViewHost:
         every case (the raw filesystem root "file:///" is a corner case:
         rstrip strips all three slashes down to "file:", not one)."""
         target = Gio.File.new_for_uri(new_uri)
+        internal_echo = False
+        expected_uri = self._expected_slot_uri
+        self._expected_slot_uri = None
+        if expected_uri is not None:
+            internal_echo = Gio.File.new_for_uri(expected_uri).equal(target)
         restore_keyboard_focus = False
         if self._pending_focus_uri is not None:
             pending_target = Gio.File.new_for_uri(self._pending_focus_uri)
@@ -2102,6 +2114,11 @@ class _ColumnViewHost:
                 # A different external navigation superseded the keyboard
                 # drill before its echo arrived.
                 self._pending_focus_uri = None
+        if not internal_echo:
+            if self.search_toggle.get_active():
+                self.search_toggle.set_active(False)
+            self.reset(new_uri)
+            return
         existing = [Gio.File.new_for_uri(c.folder_uri) for c in self.columns]
 
         idx = next((i for i, f in enumerate(existing) if f.equal(target)), None)
@@ -3331,6 +3348,24 @@ def _host_for_window(ext, win: Gtk.Window):
     slot = ext._active_slot_widget(win)
     view = getattr(slot, "_mc_column_view", None) if slot is not None else None
     return getattr(view, "_mc_column_host", None) if view is not None else None
+
+
+def sidebar_location_activated(ext, win: Gtk.Window, uri: str) -> bool:
+    """Make an explicit sidebar destination the new Miller root.
+
+    Nautilus does not emit a location notification when the row points at the
+    location already held by its hidden native slot, so handling activation
+    also guarantees stale horizontal scroll is cleared in that case.
+    """
+    if not is_active_slot_showing_column(ext, win):
+        return GLib.SOURCE_REMOVE
+    host = _host_for_window(ext, win)
+    if host is None:
+        return GLib.SOURCE_REMOVE
+    if host.search_toggle.get_active():
+        host.search_toggle.set_active(False)
+    host.reset(uri)
+    return GLib.SOURCE_REMOVE
 
 
 def rename_focused_folder(ext, win: Gtk.Window) -> bool:

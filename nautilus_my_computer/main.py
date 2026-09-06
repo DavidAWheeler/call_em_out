@@ -2635,6 +2635,16 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         for lb in all_lbs:
             lb.connect("row-selected", _on_any_lb_selected)
 
+        def _on_native_row_activated(_listbox, row) -> None:
+            try:
+                uri = row.get_property("uri")
+            except (AttributeError, TypeError):
+                uri = None
+            if uri:
+                GLib.idle_add(column_view.sidebar_location_activated, self, win, uri)
+
+        native_listbox.connect("row-activated", _on_native_row_activated)
+
         state = self._windows.get(win)
         if state is not None:
             state["sidebar_listbox"] = native_listbox

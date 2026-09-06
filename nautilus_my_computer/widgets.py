@@ -2704,6 +2704,16 @@ class MyComputerPreviewColumn(Gtk.Box):
         if file_uri is None:
             return
 
+        gfile = Gio.File.new_for_uri(file_uri)
+        self._name_lbl = Gtk.Label(label=gfile.get_basename() or file_uri)
+        self._name_lbl.set_justify(Gtk.Justification.CENTER)
+        self._name_lbl.set_wrap(True)
+        self._name_lbl.set_max_width_chars(36)
+        self._name_lbl.set_halign(Gtk.Align.FILL)
+        self._name_lbl.set_hexpand(True)
+        self._name_lbl.get_style_context().add_class("heading")
+        self.append(self._name_lbl)
+
         # The outer widget is the fixed-height split. The first child is the
         # only vertically expanding section, so it consumes exactly the space
         # left after the bottom details area. This keeps details at the window
@@ -2822,6 +2832,7 @@ class MyComputerPreviewColumn(Gtk.Box):
         self._thumb_revealer.set_transition_duration(100)
         self._thumb_revealer.set_reveal_child(True)
         self._thumb_revealer.set_child(self._preview_stack)
+        self._thumb_revealer.add_css_class("mc-preview-surface")
         preview_area.append(self._thumb_revealer)
 
         details_area = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -2831,16 +2842,6 @@ class MyComputerPreviewColumn(Gtk.Box):
         details_area.set_vexpand(False)
         self.append(details_area)
 
-        gfile = Gio.File.new_for_uri(file_uri)
-        self._name_lbl = Gtk.Label(label=gfile.get_basename() or file_uri)
-        self._name_lbl.set_justify(Gtk.Justification.CENTER)
-        self._name_lbl.set_wrap(True)
-        self._name_lbl.set_max_width_chars(20)
-        self._name_lbl.set_halign(Gtk.Align.FILL)
-        self._name_lbl.set_hexpand(True)
-        self._name_lbl.get_style_context().add_class("heading")
-        details_area.append(self._name_lbl)
-
         self._detail_lbl = Gtk.Label(label="")
         self._detail_lbl.set_halign(Gtk.Align.FILL)
         self._detail_lbl.set_hexpand(True)
@@ -2848,19 +2849,20 @@ class MyComputerPreviewColumn(Gtk.Box):
         self._detail_lbl.get_style_context().add_class("caption")
         details_area.append(self._detail_lbl)
 
+        self._go_to_folder_button = None
         if go_to_folder_uri:
             location_row, location_value = _make_kv_row(_("Location"))
             actual_location = gfile.get_path() or file_uri
             location_value.set_label(actual_location)
             location_value.set_tooltip_text(actual_location)
             location_value.set_selectable(True)
-            location_value.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
-            location_value.set_max_width_chars(34)
+            location_value.set_wrap(True)
+            location_value.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            location_value.set_max_width_chars(42)
             details_area.append(location_row)
-            go_to_folder = Gtk.Button(label=_("Go to Containing Folder"))
-            go_to_folder.add_css_class("suggested-action")
-            go_to_folder.connect("clicked", self._go_to_folder)
-            details_area.append(go_to_folder)
+            self._go_to_folder_button = Gtk.Button(label=_("Go to Containing Folder"))
+            self._go_to_folder_button.add_css_class("suggested-action")
+            self._go_to_folder_button.connect("clicked", self._go_to_folder)
 
         created_row, self._created_val = _make_kv_row(_native("Created"))
         details_area.append(created_row)
@@ -2905,6 +2907,9 @@ class MyComputerPreviewColumn(Gtk.Box):
         guessed_type, _uncertain = Gio.content_type_guess(gfile.get_basename(), None)
         self._dim_row.set_visible(bool(guessed_type) and _is_media_content_type(guessed_type))
         details_area.append(self._dim_row)
+
+        if self._go_to_folder_button is not None:
+            details_area.append(self._go_to_folder_button)
 
         self._load()
 

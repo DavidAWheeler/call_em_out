@@ -590,6 +590,10 @@ _CSS = b"""
 .mc-preview-image {
     border-radius: 12px;
 }
+.mc-preview-surface {
+    border: 1px solid alpha(@window_fg_color, 0.22);
+    border-radius: 6px;
+}
 button.mc-trash-restore.suggested-action {
     background-color: #26834a;
     background-image: none;

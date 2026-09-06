@@ -3638,6 +3638,19 @@ def _do_inject_into_slot(ext, win: Gtk.Window, slot: Gtk.Widget) -> bool:
     stack.connect("notify::visible-child", _on_slot_stack_child_changed, slot)
     slot.connect("notify::location", _on_slot_location_changed, ext, win)
     _maybe_auto_elect_column_view(ext, win, slot)
+    # Nautilus may finish restoring its native view stack after injection.
+    # Recheck this exact slot a few times so the persisted Column View choice
+    # cannot be visually replaced by a late native-list allocation.
+    for delay in (0, 150, 500):
+        GLib.timeout_add(delay, _settle_default_column_for_slot, ext, win, slot)
+    return GLib.SOURCE_REMOVE
+
+
+def _settle_default_column_for_slot(ext, win, slot) -> bool:
+    if getattr(slot, "_mc_column_view", None) is None:
+        return GLib.SOURCE_REMOVE
+    if ext._auto_elect_view_for_slot(win) == VIEW_COLUMN:
+        _maybe_auto_elect_column_view(ext, win, slot)
     return GLib.SOURCE_REMOVE
 
 

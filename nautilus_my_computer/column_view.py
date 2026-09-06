@@ -2107,6 +2107,12 @@ class _ColumnViewHost:
             # true scroll max rather than computing an edge (see
             # _scroll_to_viewport_end).
             self._scroll_to_viewport_end()
+            # A wide preview can push an ancestor's selected row under the
+            # bookmarks sidebar. Keep the selected source column readable;
+            # the preview may remain partially off-screen until the user
+            # widens the window or scrolls right.
+            if not self._column_fully_visible(index):
+                self._align_to_viewport_pos(column, 24)
         elif direction in (NAV_DOWN, NAV_SELF):
             # New content just appeared at the tail -- pull it into view
             # (right-aligned) only if it doesn't already fit.

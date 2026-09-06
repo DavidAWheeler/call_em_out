@@ -2423,12 +2423,13 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         """Pre-select (highlight, without activating) the row whose child URI
         matches uri -- used to show which entry leads to the next column when
         seeding the view from the current location's ancestor chain."""
+        # This is a committed Miller-path highlight, not an additive pointer
+        # selection. Clear stale drag state even if an async model refresh has
+        # not exposed the child URI yet; leaving the old row selected is worse
+        # than briefly showing no highlight.
+        self.clear_selection()
         index = self._index_for_uri(uri)
         if index is not None:
-            # This is a committed Miller-path highlight, not an additive
-            # pointer selection. Clear a row left selected by a cancelled drag
-            # before marking the child that actually owns the next column.
-            self.clear_selection()
             self.select_index(index)
 
     def clear_selection(self) -> None:

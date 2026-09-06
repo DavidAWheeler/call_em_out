@@ -1077,6 +1077,9 @@ class _ColumnViewHost:
         self._sync_column_selections()
         self._apply_focused_column_style()
         self._set_preview(preview_uri)
+        # Let GtkListView finish any pending bind/unbind from the drag before
+        # one final path reconciliation, covering model-refresh timing races.
+        GLib.idle_add(self._sync_column_selections)
 
     def _perform_drop_to(self, value, destination_uri: str, action) -> bool:
         if destination_uri.startswith(("column-search:", "recent:")):

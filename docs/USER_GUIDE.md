@@ -19,8 +19,9 @@ Column View has model-backed Ctrl-click toggles, Shift-click and Shift-arrow
 ranges, Ctrl+A, multi-file drag sources, direct folder-row drops, folder hover
 navigation, refresh-safe selection, group-aware Move to Trash, and a capped
 preview width. Local drag and drop moves by default; Ctrl requests copy and
-Shift requests move. Explicitly remote and NAS-mounted transfers copy by
-default. The extension continues to use Nautilus and GIO for file operations.
+Shift requests move. Mounted NAS paths follow the same move default; only
+genuinely remote GVfs locations default to copy. The extension continues to
+use Nautilus and GIO for file operations.
 
 Trash opens in Column View. Selecting an item shows its modified date, Trash
 date, and original location, with red **Delete Permanently** and green

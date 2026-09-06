@@ -999,7 +999,7 @@ class _ColumnViewHost:
         """Restore the pointer selection when a drag ends without a drop."""
         if not snapshot:
             return
-        column, uris, cursor_uri, anchor_uri = snapshot
+        column, uris, cursor_uri, anchor_uri, *preview_state = snapshot
         if column not in self.columns:
             return
         column.clear_selection()
@@ -1022,6 +1022,11 @@ class _ColumnViewHost:
         )
         self._sync_column_selections()
         self._apply_focused_column_style()
+        if preview_state:
+            # A cancelled drag must restore the complete committed state, not
+            # just the row highlight. Otherwise the old preview can remain
+            # attached to a newly selected row (or vice versa).
+            self._set_preview(preview_state[0])
 
     def _perform_drop_to(self, value, destination_uri: str, action) -> bool:
         if destination_uri.startswith(("column-search:", "recent:")):
@@ -1041,17 +1046,13 @@ class _ColumnViewHost:
             for source in files:
                 source.trash_async(GLib.PRIORITY_DEFAULT, None, None, None)
             return True
-        # Ordinary local drags move. Explicitly remote URIs and the locally
-        # mounted NAS copy by default, matching file-manager convention for
-        # transfers across machines/filesystems.
+        # Ordinary local drags move. A mounted NAS path is still one filesystem
+        # from the user's point of view, so it follows the same move default.
+        # Only genuinely remote GVfs schemes retain copy semantics.
         destination_path = destination.get_path() or ""
         if action == Gdk.DragAction.MOVE and (
             destination.get_uri_scheme() != "file"
-            or destination_path.startswith("/mnt/nas/")
-            or any(
-                f.get_uri_scheme() != "file" or (f.get_path() or "").startswith("/mnt/nas/")
-                for f in files
-            )
+            or any(f.get_uri_scheme() != "file" for f in files)
         ):
             action = Gdk.DragAction.COPY
         self._paste_uris_into_folder(
@@ -1334,6 +1335,7 @@ class _ColumnViewHost:
                 [item.uri for item in column.selected_items()],
                 cursor_item.uri if cursor_item is not None else None,
                 anchor_item.uri if anchor_item is not None else None,
+                getattr(getattr(self, "preview_column", None), "file_uri", None),
             )
             if ctrl or shift:
                 self.focused_index = self.columns.index(column)

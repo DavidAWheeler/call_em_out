@@ -2966,12 +2966,13 @@ class MyComputerPreviewColumn(Gtk.Box):
             # The image page is already visible and fills in as soon as its
             # decoded paintable arrives, with no interim icon or spinner.
             self._load_preview_image()
-        elif content_type and content_type.startswith("text/"):
+        elif self._is_text_preview_type(content_type, gfile.get_basename()):
             self._load_text_preview()
             self.set_preview_slot(PREVIEW_SLOT_DOCUMENT)
         else:
             self.set_preview_slot(PREVIEW_SLOT_ICON)
-        self._maybe_load_thumbnail(content_type, mtime)
+        if not self._is_text_preview_type(content_type, gfile.get_basename()):
+            self._maybe_load_thumbnail(content_type, mtime)
         self._maybe_load_dimensions(content_type)
 
     def _load_text_preview(self) -> None:
@@ -2990,6 +2991,14 @@ class MyComputerPreviewColumn(Gtk.Box):
             GLib.idle_add(self._text_preview.get_buffer().set_text, text)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    @staticmethod
+    def _is_text_preview_type(content_type: str | None, basename: str | None) -> bool:
+        if content_type and content_type.startswith("text/"):
+            return True
+        return bool(basename and basename.casefold().endswith((
+            ".txt", ".md", ".rst", ".log", ".csv", ".json", ".xml", ".yaml", ".yml", ".ini", ".conf"
+        )))
 
     def _restore_trash_item(self, _button) -> None:
         if self.file_uri and hasattr(self._ext, "_restore_trash_uri"):
@@ -3103,7 +3112,9 @@ class MyComputerPreviewColumn(Gtk.Box):
         subprocess and can block -- never on Nautilus's main loop. Files GNOME
         can't thumbnail (e.g. video with no thumbnailer lib installed) just keep
         the icon."""
-        if _thumb_factory is None or not content_type:
+        # Text is rendered directly in the document surface. A thumbnailer
+        # may otherwise replace it later with a tiny raster snapshot.
+        if _thumb_factory is None or not content_type or content_type.startswith("text/"):
             return
         uri = self.file_uri
         cached = _thumb_factory.lookup(uri, mtime)

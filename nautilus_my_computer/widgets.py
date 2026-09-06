@@ -36,7 +36,11 @@ try:
     from gi.repository import GnomeDesktop
 
     _thumb_factory = GnomeDesktop.DesktopThumbnailFactory.new(
-        GnomeDesktop.DesktopThumbnailSize.LARGE
+        getattr(
+            GnomeDesktop.DesktopThumbnailSize,
+            "XXLARGE",
+            GnomeDesktop.DesktopThumbnailSize.LARGE,
+        )
     )
 except (ValueError, ImportError):
     GnomeDesktop = None
@@ -2845,6 +2849,14 @@ class MyComputerPreviewColumn(Gtk.Box):
         details_area.append(self._detail_lbl)
 
         if go_to_folder_uri:
+            location_row, location_value = _make_kv_row(_("Location"))
+            actual_location = gfile.get_path() or file_uri
+            location_value.set_label(actual_location)
+            location_value.set_tooltip_text(actual_location)
+            location_value.set_selectable(True)
+            location_value.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+            location_value.set_max_width_chars(34)
+            details_area.append(location_row)
             go_to_folder = Gtk.Button(label=_("Go to Containing Folder"))
             go_to_folder.add_css_class("suggested-action")
             go_to_folder.connect("clicked", self._go_to_folder)
@@ -2996,8 +3008,18 @@ class MyComputerPreviewColumn(Gtk.Box):
     def _is_text_preview_type(content_type: str | None, basename: str | None) -> bool:
         if content_type and content_type.startswith("text/"):
             return True
+        if content_type in {
+            "application/json",
+            "application/xml",
+            "application/javascript",
+            "application/x-shellscript",
+            "application/x-yaml",
+        }:
+            return True
         return bool(basename and basename.casefold().endswith((
-            ".txt", ".md", ".rst", ".log", ".csv", ".json", ".xml", ".yaml", ".yml", ".ini", ".conf"
+            ".txt", ".md", ".rst", ".log", ".csv", ".json", ".xml",
+            ".yaml", ".yml", ".ini", ".conf", ".config", ".kdl", ".glsl",
+            ".py", ".js", ".ts", ".css", ".html", ".sh", ".fish",
         )))
 
     def _restore_trash_item(self, _button) -> None:

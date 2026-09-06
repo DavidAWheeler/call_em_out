@@ -170,6 +170,20 @@ def _disk_context_menu(ext, win, m) -> ContextMenu:
         )
     sections = [open_actions]
 
+    sections.append(
+        ContextMenuSection(
+            [
+                ContextMenuItem(
+                    _("Move Earlier"), action=lambda: _move_disk_order(ext, m.key, -1)
+                ),
+                ContextMenuItem(
+                    _("Move Later"), action=lambda: _move_disk_order(ext, m.key, 1)
+                ),
+                ContextMenuItem(_("Reset Drive Order"), action=lambda: _reset_disk_order(ext)),
+            ]
+        )
+    )
+
     # Section 1: mount / unmount / eject + format (non-protected only).
     device_items = []
     if not _is_protected_mount(m):
@@ -196,6 +210,31 @@ def _disk_context_menu(ext, win, m) -> ContextMenu:
         sections.append(properties_section(lambda: ext._do_properties(nav_uri, win)))
 
     return ContextMenu(sections)
+
+
+def _saved_disk_order(ext) -> list[str]:
+    try:
+        return list(ext._gsettings.get_strv("drive-order"))
+    except (AttributeError, GLib.Error):
+        return []
+
+
+def _move_disk_order(ext, key: str, delta: int) -> None:
+    saved = _saved_disk_order(ext)
+    current = [item for item in saved if item in _disk_data]
+    current.extend(item for item in _disk_data if item not in current)
+    if key not in current:
+        return
+    old = current.index(key)
+    new = max(0, min(len(current) - 1, old + delta))
+    if new == old:
+        return
+    current.insert(new, current.pop(old))
+    ext._gsettings.set_strv("drive-order", current)
+
+
+def _reset_disk_order(ext) -> None:
+    ext._gsettings.set_strv("drive-order", [])
 
 
 @dataclasses.dataclass
@@ -1787,8 +1826,12 @@ def _populate_slot(ext, slot, sort: tuple[str, bool] | None = None) -> None:
     # _ColumnViewHost. Sort state is per folder/view, never a cache shared by
     # whichever window most recently opened View Options.
     col, rev = sort or ext._nautilus_prefs.get_effective_folder_sort(DISKS_URI)
+    saved_disk_order = _saved_disk_order(ext)
+    disk_order_index = {key: index for index, key in enumerate(saved_disk_order)}
 
     def _sort_key(m: MountInfo):
+        if saved_disk_order:
+            return (disk_order_index.get(m.key, len(saved_disk_order) + m.first_seen),)
         if col == "size":
             return m.total
         if col == "mtime":
@@ -1835,7 +1878,9 @@ def _populate_slot(ext, slot, sort: tuple[str, bool] | None = None) -> None:
 
     # Sort each group's items
     for gkey, group in groups.items():
-        if gkey in ("system", "local"):
+        if saved_disk_order:
+            group.sort_items(key_func=_sort_key, reverse=False)
+        elif gkey in ("system", "local"):
             if col == "type":
                 group.sort_items(key_func=_get_local_mount_tier, reverse=False)
             else:
@@ -1930,7 +1975,9 @@ def _populate_slot(ext, slot, sort: tuple[str, bool] | None = None) -> None:
         if gkey == "local":
             own = [(m, "local") for m in group.items] if group.visible else []
             render_items = own + local_extra
-            if col == "type" and local_extra:
+            if saved_disk_order:
+                render_items.sort(key=lambda entry: _sort_key(entry[0]))
+            elif col == "type" and local_extra:
                 # Sort the combined list by group-level tier, then intra-group tier
                 def _merged_type_key(entry, _order=_merge_type_order):
                     m, origin = entry

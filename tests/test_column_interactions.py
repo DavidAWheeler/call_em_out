@@ -15,6 +15,7 @@ from nautilus_my_computer.widgets import (
     Gtk,
     MyComputerColumn,
     MyComputerColumnRow,
+    MyComputerPreviewColumn,
     _ColumnRowItem,
 )
 
@@ -29,6 +30,13 @@ class ColumnInteractions(unittest.TestCase):
 
     def selected(self):
         return [item.display_name for item in self.column.selected_items()]
+
+    def test_text_preview_recognizes_plain_text_and_config_formats(self):
+        detect = MyComputerPreviewColumn._is_text_preview_type
+        self.assertTrue(detect("text/plain", "notes.txt"))
+        self.assertTrue(detect("application/octet-stream", "theme.kdl"))
+        self.assertTrue(detect("application/json", "settings.data"))
+        self.assertFalse(detect("application/pdf", "document.pdf"))
 
     def test_control_drop_requests_copy_for_combined_offer(self):
         device = Mock()

@@ -27,7 +27,8 @@ Open Files again. The installer puts the extension in your user data directory; 
 - A real Trash Column View with metadata, Restore, Delete Permanently, and
   destination-aware drag-out.
 - Header search with live Column View results and file-result previews.
-- Plain-text previews, with bounded reads that keep older machines responsive.
+- Plain-text and config/code previews, readable PDF thumbnails, and full-path
+  location details in Search and Recent previews.
 - Sliding Back navigation, including Back inside Search, keeps the next
   column peeking on deck; bookmark jumps reset stale scroll, and resizing
   reveals hidden columns before stretching the preview.
@@ -40,15 +41,14 @@ native Grid and List views available.
 The desktop shell can still choose to show its own drop-action menu for a
 cross-application Trash drag; folder drops inside Nautilus are move-only.
 Search scope is intentionally bounded, and Recent remains dependent on the
-underlying `recent:///` provider's metadata. Pinned folders can be reordered
-by dragging; physical drive ordering remains owned by Nautilus. Private widget
+underlying `recent:///` provider's metadata. Pinned folders reorder by drag;
+drive and partition cards reorder from their context menus. Private widget
 names can also change between releases.
 
 ## What's next
 
 The next useful targets are deeper Recent actions, searchable scope controls,
-user-controlled drive ordering if Nautilus exposes a stable API, and
-compatibility probes for private-header changes.
+and compatibility probes for private-header changes.
 
 Install and usage information is in [docs/USER_GUIDE.md](docs/USER_GUIDE.md). The detailed status is in [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md).
 

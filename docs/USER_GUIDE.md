@@ -44,9 +44,11 @@ it does not cover the results or their children. **Go to Containing Folder**
 opens the directory and selects the file. The same button works in Recent,
 whose entries resolve to their actual file locations.
 
-Plain-text files show a bounded, read-only excerpt. Images and document
-thumbnails use a modest 1280-pixel cap so they are easier to inspect without
-turning an older CPU into a space heater.
+Plain-text, configuration, and common code files show a bounded, read-only
+excerpt. PDF thumbnails request GNOME's 1024-pixel tier; direct image previews
+are capped at 1280 pixels, improving legibility without decoding an unlimited
+source image. Search and Recent previews also show the selected file's full
+path in a selectable **Location** row.
 
 The original project remains the reference for installation, upstream behavior, translations, and general architecture. Native Grid and List views remain the fallback when a behavior is not yet reliable in this fork.
 
@@ -62,13 +64,15 @@ Back first walks the open result columns before leaving that special root.
 Clicking a bookmark hard-resets stale horizontal scroll before loading the new
 location.
 
-The **Pinned folders** group can be reordered by dragging its cards. Physical
-drives and partitions retain Nautilus's native order because it does not expose
-a stable user-order API for them.
+The **Pinned folders** group can be reordered by dragging its cards. Drive and
+partition cards have **Move Earlier**, **Move Later**, and **Reset Drive Order**
+actions in their context menus.
 
 ## Known limits
 
-Search intentionally stops after four directory levels or 200 matches. A
+Search hides dotfiles and other hidden entries unless Nautilus's Show Hidden
+Files setting is enabled. An empty search offers **Include Hidden Files** for
+that query. Search intentionally stops after four directory levels or 200 matches. A
 Trash drag is materialized when the drag begins, so cancelling a drag can leave
 the item in the extension's user cache rather than in Trash; successful drops
 move it to the requested destination. Link creation is not offered by Column

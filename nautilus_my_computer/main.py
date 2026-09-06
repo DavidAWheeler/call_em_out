@@ -1000,7 +1000,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         elif key.startswith("visibility-"):
             # Grouping change only -- no rescan needed, just re-render
             self._repopulate_visible()
-        elif key == "preferred-folders":
+        elif key in ("preferred-folders", "drive-order"):
             self._repopulate_visible()
         elif key in ("column-view-sort-by", "column-view-sort-reversed"):
             column_view.schedule_global_column_sort_sync(self)
@@ -1452,6 +1452,12 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         state = self._windows.get(win)
         if not state:
             return
+
+        native_listbox = state.get("sidebar_listbox")
+        if native_listbox is not None:
+            self._apply_native_place_visibility(
+                native_listbox, state.get("sidebar_boundary_separator")
+            )
 
         current_title = win.get_title() or ""
         # A transient/empty title ("Loading…") means the window hasn't resolved
@@ -2353,6 +2359,12 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             # any() short-circuits: the second name is only tried if the first
             # was not accepted.
             activated = any(self._activate_qualified_action(n, param, win) for n in names)
+
+            # Acceptance is the hand-off point. Repeating the action while
+            # Nautilus commits it asynchronously can override a Home click
+            # made during startup and leave Home selected over Computer data.
+            if activated:
+                return GLib.SOURCE_REMOVE
 
             if final:
                 # Do not wait for a 26th tick to confirm. activate_action()

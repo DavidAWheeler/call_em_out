@@ -43,6 +43,12 @@
       <description>Show boot and EFI partitions in the System group</description>
     </key>
 
+    <key name="drive-order" type="as">
+      <default>[]</default>
+      <summary>Custom drive and partition order</summary>
+      <description>Stable mount keys in the order chosen from Computer card menus. Newly discovered devices follow saved entries.</description>
+    </key>
+
     <key name="visibility-system" enum="io.github.yannmasoch.nautilus-my-computer.visibility">
       <default>'visible'</default>
       <summary>System group visibility</summary>

@@ -576,6 +576,7 @@ class _ColumnViewHost:
         search_bar.append(self.search_toggle)
         search_bar.append(self.search_entry)
         self.search_result_column = None
+        self._search_include_hidden_query = None
         self._search_origin_uri = root_uri
         self.search_overlay.add_overlay(search_bar)
         self.search_toggle.connect("toggled", self._on_search_toggled)
@@ -680,26 +681,40 @@ class _ColumnViewHost:
         self._search_generation = getattr(self, "_search_generation", 0) + 1
         generation = self._search_generation
         self.search_result_column._empty_page.set_title(_("Searching…"))
+        self.search_result_column._empty_page.set_description(None)
+        self.search_result_column._empty_page.set_child(None)
         self.search_result_column._show_empty_page(True)
+        include_hidden = (
+            self._ext._nautilus_prefs.hidden_files()
+            or self._search_include_hidden_query == query
+        )
 
         def worker():
             found = []
             if self._root_uri.startswith("computer:"):
                 roots = [
-                    # `/` is the local filesystem tree; Home and /mnt are
-                    # retained as useful fast roots for common local mounts.
-                    Gio.File.new_for_path("/"),
+                    # Fast roots first, then `/` for the rest of the local
+                    # filesystem. processed_folders below prevents overlap
+                    # from enumerating Home or mount trees twice.
                     Gio.File.new_for_path(os.path.expanduser("~")),
                     Gio.File.new_for_path("/mnt"),
+                    Gio.File.new_for_path("/media"),
+                    Gio.File.new_for_path("/"),
                 ]
             else:
                 roots = [Gio.File.new_for_uri(self._root_uri)]
             queue = [(root, 0) for root in roots]
+            seen = set()
+            processed_folders = set()
             while queue and len(found) < 200:
                 folder, depth = queue.pop(0)
+                folder_uri = folder.get_uri()
+                if folder_uri in processed_folders:
+                    continue
+                processed_folders.add(folder_uri)
                 try:
                     enum = folder.enumerate_children(
-                        "standard::name,standard::display-name,standard::type",
+                        "standard::name,standard::display-name,standard::type,standard::is-hidden",
                         Gio.FileQueryInfoFlags.NONE,
                         None,
                     )
@@ -709,11 +724,16 @@ class _ColumnViewHost:
                             break
                         name = info.get_display_name() or info.get_name()
                         child_file = folder.get_child(info.get_name())
-                        if query in name.casefold():
+                        hidden = info.get_is_hidden() or info.get_name().startswith(".")
+                        if hidden and not include_hidden:
+                            continue
+                        child_uri = child_file.get_uri()
+                        if query in name.casefold() and child_uri not in seen:
+                            seen.add(child_uri)
                             found.append(
                                 (
                                     name,
-                                    child_file.get_uri(),
+                                    child_uri,
                                     info.get_file_type() == Gio.FileType.DIRECTORY,
                                 )
                             )
@@ -722,16 +742,29 @@ class _ColumnViewHost:
                     enum.close(None)
                 except GLib.Error:
                     continue
-            GLib.idle_add(self._finish_search, generation, found)
+            GLib.idle_add(self._finish_search, generation, found, query, include_hidden)
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _finish_search(self, generation, found) -> bool:
+    def _finish_search(self, generation, found, query=None, include_hidden=False) -> bool:
         if generation != getattr(self, "_search_generation", 0):
             return GLib.SOURCE_REMOVE
         if self.search_result_column is not None:
             self.search_result_column.set_search_results(found)
+            if not found and not include_hidden and not self._ext._nautilus_prefs.hidden_files():
+                button = Gtk.Button(label=_("Include Hidden Files"))
+                button.set_halign(Gtk.Align.CENTER)
+                button.add_css_class("suggested-action")
+                button.connect("clicked", self._include_hidden_search, query or "")
+                self.search_result_column._empty_page.set_description(
+                    _("No visible files matched this search.")
+                )
+                self.search_result_column._empty_page.set_child(button)
         return GLib.SOURCE_REMOVE
+
+    def _include_hidden_search(self, _button, query: str) -> None:
+        self._search_include_hidden_query = query
+        self._on_search_changed(self.search_entry)
 
     def _on_search_activate(self, _entry) -> None:
         # Enter commits the query but does not activate the first result.

@@ -30,6 +30,41 @@ class ColumnInteractions(unittest.TestCase):
     def selected(self):
         return [item.display_name for item in self.column.selected_items()]
 
+    def test_control_drop_requests_copy_for_combined_offer(self):
+        device = Mock()
+        device.get_modifier_state.return_value = Gdk.ModifierType.CONTROL_MASK
+        drop = Mock()
+        drop.get_device.return_value = device
+        drop.get_actions.return_value = Gdk.DragAction.COPY | Gdk.DragAction.MOVE
+        target = Mock()
+        target.get_current_drop.return_value = drop
+        self.assertEqual(_ColumnViewHost._on_column_drop_motion(None, target, 0, 0), Gdk.DragAction.COPY)
+
+    def test_search_back_preserves_columns_and_steps_to_computer(self):
+        host = _ColumnViewHost.__new__(_ColumnViewHost)
+        host.columns = [Mock(), Mock(), Mock()]
+        host.search_result_column = host.columns[0]
+        host._history_index = host.focused_index = 2
+        host.preview_column = SimpleNamespace(file_uri=None)
+        host._finish_location_transition = Mock()
+        host._cancel_row_commit = Mock()
+        host._apply_focused_column_style = Mock()
+        host._focus_column_when_mapped = Mock()
+        host._align_to_viewport_pos = Mock()
+        host._update_back_button = Mock()
+        host.search_toggle = Mock()
+        host.search_toggle.get_active.return_value = False
+        host._ext = Mock()
+        host._win = Mock()
+        self.assertTrue(host._back_in_columns())
+        self.assertEqual(host.focused_index, 1)
+        self.assertEqual(len(host.columns), 3)
+        host._align_to_viewport_pos.assert_called_with(host.columns[1], 24)
+        host._back_in_columns()
+        self.assertEqual(host.focused_index, 0)
+        host._back_in_columns()
+        host._ext._navigate_current_in_place.assert_called_once_with("computer:///", host._win)
+
     def test_search_result_uses_real_uri_and_normal_multiselection(self):
         self.column.set_search_results([
             ("first", "file:///tmp/one/first", False),

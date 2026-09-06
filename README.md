@@ -17,8 +17,8 @@ Open Files again. The installer puts the extension in your user data directory; 
 
 - Search results, nested folders, and previews share the ordinary column
   layout: drill right, keep the parent trail, and preview after the last folder.
-- **Go to Containing Folder** opens the real directory and selects the file
-  from either Search or Recent.
+- **Go to Containing Folder** slides the destination in from the right, keeps
+  the prior trail mounted, and selects the file from either Search or Recent.
 - More dependable Ctrl/Shift multi-selection, including selection that survives refreshes.
 - Multi-file drag and drop: local moves by default, remote/NAS transfers copy,
   Ctrl copies, and Shift moves.
@@ -27,7 +27,8 @@ Open Files again. The installer puts the extension in your user data directory; 
 - A real Trash Column View with metadata, Restore, Delete Permanently, and
   destination-aware drag-out.
 - Header search with live Column View results and file-result previews.
-- Sliding Back navigation, safer bookmark jumps, and resize behavior that
+- Sliding Back navigation, including Back inside Search, keeps the next
+  column peeking on deck; bookmark jumps reset stale scroll, and resizing
   reveals hidden columns before stretching the preview.
 
 The fork does not replace Nautilus or claim to be a new file manager. It keeps
@@ -38,7 +39,8 @@ native Grid and List views available.
 The desktop shell can still choose to show its own drop-action menu for a
 cross-application Trash drag; folder drops inside Nautilus are move-only.
 Search scope is intentionally bounded, and Recent remains dependent on the
-underlying `recent:///` provider's metadata.
+underlying `recent:///` provider's metadata. Nautilus private widget names can
+also change between releases.
 
 ## What's next
 

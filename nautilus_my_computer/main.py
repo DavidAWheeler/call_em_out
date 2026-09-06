@@ -1330,6 +1330,12 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         if not win_state:
             _log(f"key_capture: no state for win, keyval={Gdk.keyval_name(keyval)}")
             return False
+        if keyval == Gdk.KEY_Left and gtk_state & Gdk.ModifierType.ALT_MASK:
+            slot = self._active_slot_widget(win)
+            view = getattr(slot, "_mc_column_view", None)
+            host = getattr(view, "_mc_column_host", None)
+            if host is not None and view.get_mapped() and host._back_in_columns():
+                return True
         panel_state = self._active_panel_state(win)
         _log(
             f"key_capture: keyval={Gdk.keyval_name(keyval)} "

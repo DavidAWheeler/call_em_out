@@ -631,7 +631,7 @@ class _ColumnViewHost:
         else:
             self._search_generation = getattr(self, "_search_generation", 0) + 1
             self.search_entry.set_text("")
-            if self.search_result_column is not None:
+            if self.search_result_column is not None and not getattr(self, "_preserve_search_chain", False):
                 self.search_result_column = None
                 self.reset(self._search_origin_uri)
 
@@ -739,6 +739,10 @@ class _ColumnViewHost:
             self.search_result_column.grab_list_focus()
 
     def reset(self, root_uri: str) -> None:
+        self._finish_location_transition()
+        self._containing_location_uri = None
+        self._retained_navigation = False
+        self.search_result_column = None
         self._detach_root()
         for column in self.columns:
             column.destroy_enumeration()
@@ -769,6 +773,7 @@ class _ColumnViewHost:
         self._rebuild_chain()
 
     def _poll_viewport_size(self, _widget, _clock) -> bool:
+        self._update_back_button()
         if self.search_toggle.get_active():
             for widget in self._native_header_surfaces():
                 widget.set_visible(False)
@@ -782,6 +787,53 @@ class _ColumnViewHost:
                 )
             self._last_viewport_size = size
             self._sync_root_width()
+        return True
+
+    def _uses_column_history(self) -> bool:
+        return self.search_result_column is not None or getattr(self, "_retained_navigation", False)
+
+    def _update_back_button(self) -> None:
+        if not self.widget.get_mapped():
+            return
+        button = getattr(self, "_back_button", None)
+        if button is None:
+            button = next((w for w in _all_widgets(self._win)
+                           if isinstance(w, Gtk.Button) and w.get_action_name() == "slot.back"), None)
+            if button is None:
+                return
+            self._back_button = button
+            button.connect("clicked", lambda _button: self._back_in_columns()
+                           if getattr(self, "_owns_back_button", False) else None)
+        owned = self._uses_column_history()
+        if owned != getattr(self, "_owns_back_button", False):
+            self._owns_back_button = owned
+            button.set_action_name(None if owned else "slot.back")
+        if owned:
+            button.set_sensitive(True)
+
+    def _back_in_columns(self) -> bool:
+        if not self._uses_column_history():
+            return False
+        self._finish_location_transition()
+        self._cancel_row_commit()
+        self.focused_index = min(getattr(self, "_history_index", self.focused_index), len(self.columns) - 1)
+        if self.preview_column.file_uri:
+            self._set_preview(None)
+            self._replace_preview_in_chain()
+        elif self.focused_index > 0:
+            self.focused_index -= 1
+        else:
+            self._retained_navigation = False
+            if self.search_toggle.get_active():
+                self.search_toggle.set_active(False)
+            self.search_result_column = None
+            self._update_back_button()
+            self._ext._navigate_current_in_place("computer:///", self._win)
+            return True
+        self._apply_focused_column_style()
+        self._history_index = self.focused_index
+        self._focus_column_when_mapped(self.columns[self.focused_index])
+        self._align_to_viewport_pos(self.columns[self.focused_index], 24)
         return True
 
     def _build_columns(self) -> list[Gtk.Widget]:
@@ -812,6 +864,7 @@ class _ColumnViewHost:
         column._prepare_drag_uri = self._prepare_drag_uri
         column._finish_drag = self._finish_drag
         column._perform_drop = self._perform_drop_to
+        column._choose_drop_action = self._on_column_drop_motion
         return column
 
     def _prepare_drag_uri(self, uri: str) -> str:
@@ -875,6 +928,8 @@ class _ColumnViewHost:
             if ctrl and shift
             else Gdk.DragAction.MOVE
             if shift
+            else Gdk.DragAction.COPY
+            if ctrl
             else Gdk.DragAction.MOVE
         )
         offered = current.get_actions() if current is not None else Gdk.DragAction(0)
@@ -1797,6 +1852,7 @@ class _ColumnViewHost:
         # The trailing preview width is derived from PREVIEW_WIDTH plus any
         # available viewport slack, so it is not tracked per-instance.
         index = self.columns.index(column)
+        self._finish_location_transition()
         # Read before any mutation below (self.focused_index still holds the
         # previously-focused column, see col_nav_direction).
         direction = col_nav_direction(self.focused_index, index)
@@ -1888,6 +1944,7 @@ class _ColumnViewHost:
                 if not stale:
                     chain_update = "replace_preview"
 
+        self._history_index = self.columns.index(new_column) if new_column is not None else index
         self._sync_column_selections()
         self._apply_focused_column_style()
         # Keep the existing horizontal adjustment during Back. The stale
@@ -1936,7 +1993,7 @@ class _ColumnViewHost:
         re-enumerates the folder asynchronously. The covered native view stays
         alive while Column View is active so returning to Grid/List restores
         Nautilus's own slot state without a forced reload."""
-        if getattr(self, "search_result_column", None) is not None:
+        if self.search_toggle.get_active():
             return
         if restore_keyboard_focus:
             self._pending_focus_uri = uri
@@ -1954,6 +2011,11 @@ class _ColumnViewHost:
             self.aligner.set_content(None)
 
     def sync_to_uri(self, new_uri: str) -> None:
+        if new_uri == getattr(self, "_containing_location_uri", None):
+            # This deliberate jump may target a directory that already
+            # exists earlier in the retained trail. Its native location
+            # echo must not select that old copy and cancel the slide-in.
+            return
         # A sidebar/path-bar/history location change supersedes a visible
         # search. Without this, the search overlay survived a Computer click
         # and trapped the user until they returned to its original root.
@@ -2085,6 +2147,7 @@ class _ColumnViewHost:
         # See the truncate branch above: the newly appended column is
         # "current" for keyboard nav's purposes, same as any other drill.
         self.focused_index = len(self.columns) - 1
+        self._history_index = self.focused_index
         self._sync_column_selections()
         self._apply_focused_column_style()
         self._rebuild_chain()
@@ -2241,6 +2304,10 @@ class _ColumnViewHost:
         _on_row_activated_internal's mouse click-policy/repeat-click timing,
         not a plain "open now".
         """
+        if (keyval == Gdk.KEY_BackSpace or
+            (keyval == Gdk.KEY_Left and gtk_state & Gdk.ModifierType.ALT_MASK)):
+            if self._back_in_columns():
+                return True
         if keyval in (Gdk.KEY_asciitilde, Gdk.KEY_slash):
             # Handing off to Nautilus's own address-bar shortcuts -- nothing
             # queued for this chain should land after the user has moved on.
@@ -2526,12 +2593,49 @@ class _ColumnViewHost:
             )
 
     def _open_containing_folder(self, file_uri: str, folder_uri: str) -> None:
+        self._finish_location_transition()
+        self._cancel_row_commit()
+        if self._scroll_animation is not None:
+            self._scroll_animation.pause()
+        if self._scroll_settle_debounce_id:
+            GLib.source_remove(self._scroll_settle_debounce_id)
+            self._scroll_settle_debounce_id = 0
+        self._pending_scroll_intent = None
+        self._preserve_search_chain = True
         if self.search_toggle.get_active():
             self.search_toggle.set_active(False)
-        self.reset(folder_uri)
+        self._preserve_search_chain = False
+        self._retained_navigation = True
+        old_preview = self.preview_column
+        old_preview.width = max(PREVIEW_WIDTH, old_preview.get_width())
+        self._transition_preview = old_preview
+        self.preview_column = self._make_preview_column()
+        destination = self._make_real_column(folder_uri)
+        self.columns.append(destination)
+        self.focused_index = len(self.columns) - 1
+        self._history_index = self.focused_index
+        self._containing_location_uri = folder_uri
         self._pending_reveal_uri = file_uri
+        self._rebuild_chain()
         self._sync_slot_location(folder_uri)
-        self._align_to_viewport_pos(self.columns[0], 24)
+        self._align_to_viewport_pos(destination, 24)
+
+    def _finish_location_transition(self) -> None:
+        old_preview = getattr(self, "_transition_preview", None)
+        if old_preview is None:
+            return
+        if self._scroll_animation is not None:
+            self._scroll_animation.pause()
+        destination = self.columns[-1]
+        old_x = self._widget_canvas_x(old_preview)
+        destination_x = self._widget_canvas_x(destination)
+        removed_width = (destination_x - old_x if old_x is not None and destination_x is not None
+                         else old_preview.width + 1)
+        self._transition_preview = None
+        old_preview.destroy_enumeration()
+        adjustment = self.scroller.get_hadjustment()
+        adjustment.set_value(max(0, adjustment.get_value() - removed_width))
+        self._rebuild_chain()
 
     def _rebuild_chain(self) -> None:
         old_root = getattr(self, "root", None)
@@ -2539,7 +2643,11 @@ class _ColumnViewHost:
             self._detach_paned_children(old_root)
 
         self.paneds = []
-        self.root = self._make_paned_chain([*self.columns, self.preview_column])
+        chain = [*self.columns, self.preview_column]
+        transition_preview = getattr(self, "_transition_preview", None)
+        if transition_preview is not None:
+            chain.insert(len(chain) - 2, transition_preview)
+        self.root = self._make_paned_chain(chain)
         self.root.set_vexpand(True)
         self.root.set_valign(Gtk.Align.FILL)
         self.aligner.set_content(self.root)
@@ -2571,6 +2679,8 @@ class _ColumnViewHost:
         paned = self._make_paned(column, self.preview_column, len(self.columns) - 1)
         tail.set_end_child(paned)
         self.paneds.insert(0, paned)
+        paned.queue_resize()
+        tail.queue_resize()
         self._sync_root_width()
 
     def _replace_preview_in_chain(self) -> None:
@@ -2744,7 +2854,7 @@ class _ColumnViewHost:
             self._scroll_settle_debounce_id = 0
         self._pending_scroll_intent = None
         if self._scroll_animation is not None:
-            self._scroll_animation.skip()
+            self._scroll_animation.pause()
             self._scroll_animation = None
         adjustment = self.scroller.get_hadjustment()
         if adjustment is not None:
@@ -2760,6 +2870,9 @@ class _ColumnViewHost:
         # halign=FILL on the preview widget itself); once they overflow it
         # sits at its own PREVIEW_WIDTH floor and the scroller scrolls.
         fixed_width = self._col_position(len(self.columns))
+        transition_preview = getattr(self, "_transition_preview", None)
+        if transition_preview is not None:
+            fixed_width += transition_preview.width + HANDLE_WIDTH_ESTIMATE
         preview_default_width = PREVIEW_WIDTH
 
         if viewport_width <= 0:
@@ -2786,8 +2899,8 @@ class _ColumnViewHost:
         adj.set_upper(canvas_width)
         adj.set_page_size(viewport_width)
         adj.set_page_increment(viewport_width)
-        self.root.queue_allocate()
-        self.aligner.queue_allocate()
+        self.root.queue_resize()
+        self.aligner.queue_resize()
 
     def _col_position(self, index: int) -> float:
         """Canvas x-position where self.columns[index] starts (or, for
@@ -3026,6 +3139,12 @@ class _ColumnViewHost:
                     target = left + widget.get_width() - adj.get_page_size()
                 elif kind == "align_pos":
                     target = left - position
+                    # A destination must be able to settle at the requested
+                    # inset even when its trailing preview is narrower than
+                    # the viewport. Reserve enough canvas for that motion.
+                    if target > adj.get_upper() - adj.get_page_size():
+                        adj.set_upper(target + adj.get_page_size())
+                        self.root.set_size_request(int(adj.get_upper()), self.scroller.get_height())
                 else:
                     target = left
                 target = max(0.0, min(adj.get_upper() - adj.get_page_size(), target))
@@ -3043,15 +3162,15 @@ class _ColumnViewHost:
         internal Viewport is ever going to reclamp its value mid-flight out
         from under us (see _MillerCanvas's docstring).
 
-        A later call while one is still playing (e.g. rapid clicks through
-        several folders) skips the old animation straight to its own end
-        value first -- two Adw.TimedAnimations independently driving the
-        same adjustment would otherwise fight each other frame to frame."""
+        A later request pauses the old animation at its current position.
+        The replacement continues from there without jumping to the old
+        target or letting two animations fight over the adjustment."""
         if self._scroll_animation is not None:
-            self._scroll_animation.skip()
+            self._scroll_animation.pause()
         adj = self.scroller.get_hadjustment()
         current = adj.get_value()
         if current == target_value:
+            self._finish_location_transition()
             return
         target = Adw.CallbackAnimationTarget.new(adj.set_value)
         animation = Adw.TimedAnimation.new(
@@ -3059,6 +3178,7 @@ class _ColumnViewHost:
         )
         animation.set_easing(Adw.Easing.EASE_OUT_CUBIC)
         self._scroll_animation = animation
+        animation.connect("done", lambda _animation: self._finish_location_transition())
         animation.play()
 
     def _fade_in(self, widget: Gtk.Widget, duration: int = SCROLL_ANIMATION_DURATION_MS) -> None:

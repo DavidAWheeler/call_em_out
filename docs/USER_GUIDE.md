@@ -32,8 +32,11 @@ The search button sits directly after Back and Forward. `Ctrl+F` opens or
 closes the same header field. Results appear as a live **Search results**
 column. Enter runs the typed query without opening the first match. Folder
 results keep the result trail visible and open their contents in adjacent
-columns; file results show a preview with **Go to Containing Folder**. Changing
-location with a bookmark, path bar, or history control closes search cleanly.
+columns; file results show a preview with **Go to Containing Folder**. That
+action slides the containing directory in from the right, leaves the previous
+trail available for Back, collapses the old preview, and selects the file in
+the destination. Changing location with a bookmark, path bar, or history
+control closes search cleanly.
 
 Search uses the same rows, selection model, resizable columns, and horizontal
 scrolling as folder browsing. A preview follows the last folder column;
@@ -49,9 +52,11 @@ The original project remains the reference for installation, upstream behavior, 
 
 Dragging a selected group onto a folder row transfers it directly; waiting on
 the row also opens the folder so deeper destinations can be chosen. Back moves
-the viewport left and leaves the deeper branch mounted off to the right, so
-Forward can slide back to it. Clicking a bookmark hard-resets stale horizontal
-scroll before loading the new location.
+the viewport left one column at a time and leaves the deeper branch mounted
+off to the right, with a small on-deck sliver visible. In Search and Recent,
+Back first walks the open result columns before leaving that special root.
+Clicking a bookmark hard-resets stale horizontal scroll before loading the new
+location.
 
 ## Known limits
 

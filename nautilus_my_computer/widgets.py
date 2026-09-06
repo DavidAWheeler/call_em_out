@@ -1908,6 +1908,9 @@ class MyComputerColumn(Gtk.ScrolledWindow):
     def _on_row_drop_motion(self, target, _x, _y, row):
         if row is not getattr(self, "_drop_hover_row", None):
             return Gdk.DragAction(0)
+        choose_action = getattr(self, "_choose_drop_action", None)
+        if choose_action is not None:
+            return choose_action(target, _x, _y)
         offered = target.get_current_drop().get_actions()
         return Gdk.DragAction.MOVE if offered & Gdk.DragAction.MOVE else Gdk.DragAction.COPY
 

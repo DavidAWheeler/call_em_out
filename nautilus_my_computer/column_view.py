@@ -898,6 +898,7 @@ class _ColumnViewHost:
         drop.connect("drop", self._on_column_drop, column)
         column.add_controller(drop)
         column._on_files_dragged = lambda: self._watch_operation_directories([column.folder_uri])
+        column._mc_host = self
         column._prepare_drag_uri = self._prepare_drag_uri
         column._finish_drag = self._finish_drag
         column._perform_drop = self._perform_drop_to

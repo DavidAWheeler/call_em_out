@@ -1407,7 +1407,8 @@ class MyComputerColumnRow(Gtk.Box):
         # successful moves naturally drop missing URIs, while cancelled and
         # invalid drags regain the committed row/preview state.
         if column is not None:
-            restore_committed = getattr(column, "_restore_committed_drag_state", None)
+            host = getattr(column, "_mc_host", None)
+            restore_committed = getattr(host, "_restore_committed_drag_state", None)
             if restore_committed is not None:
                 restore_committed()
             else:

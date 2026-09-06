@@ -3092,6 +3092,12 @@ class _ColumnViewHost:
 
         if viewport_width <= 0:
             preview_width = preview_default_width
+        elif adj.get_value() > 0:
+            # Once the chain has scrolled left to reveal an ancestor, do not
+            # let the preview absorb viewport slack. Keeping its normal width
+            # prevents its title/content from extending beyond the window and
+            # leaves the selected source column readable beside it.
+            preview_width = preview_default_width
         else:
             available_for_preview = viewport_width - fixed_width
             preview_width = min(

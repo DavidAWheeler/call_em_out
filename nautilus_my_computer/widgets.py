@@ -2415,6 +2415,10 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         seeding the view from the current location's ancestor chain."""
         index = self._index_for_uri(uri)
         if index is not None:
+            # This is a committed Miller-path highlight, not an additive
+            # pointer selection. Clear a row left selected by a cancelled drag
+            # before marking the child that actually owns the next column.
+            self.clear_selection()
             self.select_index(index)
 
     def clear_selection(self) -> None:

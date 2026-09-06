@@ -173,6 +173,28 @@ class ColumnInteractions(unittest.TestCase):
         self.assertEqual(self.column.selected_item().uri, "file:///tmp/1")
         host._sync_column_selections.assert_called_once_with()
 
+    def test_path_sync_clears_failed_drag_highlight(self):
+        host = _ColumnViewHost.__new__(_ColumnViewHost)
+        child = MyComputerColumn.__new__(MyComputerColumn)
+        # Use the real model/selection machinery without starting I/O.
+        Gtk.ScrolledWindow.__init__(child)
+        child._store = Gio.ListStore(item_type=_ColumnRowItem)
+        child._selection = Gtk.MultiSelection(model=child._store)
+        child._cursor_index = None
+        child._selection_anchor = None
+        child.folder_uri = "file:///tmp/Downloads"
+        child._store.append(_ColumnRowItem("file:///tmp/Downloads/a", "a", False))
+        parent = self.column
+        parent.folder_uri = "file:///tmp"
+        parent.select_index(2)  # stale failed-drag highlight (not Downloads)
+        parent._store.append(_ColumnRowItem("file:///tmp/Downloads", "Downloads", True))
+        # Put the committed child target at the end of the parent model.
+        host.columns = [parent, child]
+        host.preview_column = SimpleNamespace(file_uri=None)
+        host._sync_column_selections()
+        self.assertEqual(parent.selected_item().uri, "file:///tmp/Downloads")
+        self.assertEqual(parent.selected_items(), [parent.selected_item()])
+
     def test_modifier_click_moves_keyboard_focus_to_its_column(self):
         host = SimpleNamespace(
             _cancel_row_commit=Mock(),

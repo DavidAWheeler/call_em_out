@@ -2821,6 +2821,10 @@ class MyComputerPreviewColumn(Gtk.Box):
         self._name_lbl = Gtk.Label(label=gfile.get_basename() or file_uri)
         self._name_lbl.set_justify(Gtk.Justification.CENTER)
         self._name_lbl.set_wrap(True)
+        # Long archive/document names often contain an unbroken token. Word
+        # wrapping alone leaves that token wider than the pane and clips it;
+        # allow character wrapping so the default preview width remains useful.
+        self._name_lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         self._name_lbl.set_max_width_chars(36)
         self._name_lbl.set_halign(Gtk.Align.FILL)
         self._name_lbl.set_hexpand(True)

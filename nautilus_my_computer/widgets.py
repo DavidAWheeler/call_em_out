@@ -1401,7 +1401,12 @@ class MyComputerColumnRow(Gtk.Box):
         finish = getattr(column, "_finish_drag", None) if column is not None else None
         if finish is not None:
             finish(bool(delete_data))
-        if not delete_data and column is not None:
+        # GTK's delete_data flag describes the negotiated transfer, but some
+        # desktop and external targets report it as true even when the drop
+        # is rejected. Always reconcile the source selection at drag end;
+        # successful moves naturally drop missing URIs, while cancelled and
+        # invalid drags regain the committed row/preview state.
+        if column is not None:
             restore = getattr(column, "_restore_drag_selection", None)
             if restore is not None:
                 restore(getattr(self, "_mc_drag_selection_snapshot", None))

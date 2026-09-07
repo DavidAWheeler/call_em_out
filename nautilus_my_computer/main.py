@@ -2172,9 +2172,10 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
     def _move_search_toggle_left(self, win: Gtk.Window) -> bool:
         """Reparent Nautilus's real search toggle beside Back/Forward.
 
-        Nautilus 49 puts ``slot.search-visible`` in the trailing toolbar
-        controls. Both groups are Gtk.Box children, so the same live button
-        can be moved without duplicating its action or state.
+        The native search control stays hidden and the extension toggle is
+        reparented with Nautilus's live history buttons. The action-bearing
+        buttons, rather than Nautilus private container names, are the stable
+        anchor across supported releases.
         """
         native_search = next(
             (
@@ -2203,18 +2204,36 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         host = getattr(view, "_mc_column_host", None) if view is not None else None
         search = getattr(host, "search_toggle", None)
         search_entry = getattr(host, "search_entry", None)
-        if native_search is None or search is None or search_entry is None or forward is None:
+        if search is None or search_entry is None or forward is None:
             GLib.timeout_add(100, self._move_search_toggle_left, win)
             return GLib.SOURCE_REMOVE
-        native_search.set_visible(False)
+        if native_search is not None:
+            native_search.set_visible(False)
         old_parent = search.get_parent()
-        nav_group = forward
-        while nav_group is not None and type(nav_group).__name__ != "NautilusHistoryControls":
-            nav_group = nav_group.get_parent()
-        new_parent = nav_group.get_parent() if nav_group is not None else None
-        if isinstance(old_parent, (Gtk.Box, Gtk.Stack)) and isinstance(new_parent, Gtk.Box):
+        back = next(
+            (
+                w
+                for w in _all_widgets(win)
+                if isinstance(w, Gtk.Button)
+                and hasattr(w, "get_action_name")
+                and w.get_action_name() == "slot.back"
+                and w.get_mapped()
+            ),
+            None,
+        )
+        # Use the actual live Back/Forward ancestry rather than a private
+        # Nautilus class name.  Nautilus has changed that class twice, but
+        # the action-bearing buttons are the public, stable contract.
+        history = forward
+        while history is not None and back is not None and back not in _all_widgets(history):
+            history = history.get_parent()
+        placement_parent = history.get_parent() if history is not None else None
+        while placement_parent is not None and not isinstance(placement_parent, Gtk.Box):
+            history = placement_parent
+            placement_parent = placement_parent.get_parent()
+        if isinstance(old_parent, (Gtk.Box, Gtk.Stack)) and isinstance(placement_parent, Gtk.Box):
             location_widget = None
-            sibling = nav_group.get_next_sibling()
+            sibling = history.get_next_sibling()
             while sibling is not None:
                 if any(
                     isinstance(child, Gtk.Button)
@@ -2230,23 +2249,24 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             # Instead wrap the real history control and our toggle in the
             # same segmented shell used by Grid/List/Columns. Reparenting the
             # controls preserves Nautilus's actions and history sensitivity.
-            wrapper = getattr(nav_group, "_mc_history_search_wrapper", None)
+            wrapper = getattr(history, "_mc_history_search_wrapper", None)
             if wrapper is None:
-                before = nav_group.get_prev_sibling()
-                new_parent.remove(nav_group)
+                before = history.get_prev_sibling()
+                placement_parent.remove(history)
                 old_parent.remove(search)
                 wrapper = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=1)
                 wrapper.add_css_class("mc-history-search-group")
                 wrapper.set_valign(Gtk.Align.FILL)
-                wrapper.append(nav_group)
+                wrapper.append(history)
                 wrapper.append(search)
-                nav_group._mc_history_search_wrapper = wrapper
-                new_parent.insert_child_after(wrapper, before)
+                history._mc_history_search_wrapper = wrapper
+                placement_parent.insert_child_after(wrapper, before)
             elif search.get_parent() is not wrapper:
                 old_parent.remove(search)
                 wrapper.append(search)
             search.set_margin_start(0)
             search.set_margin_end(0)
+            history.add_css_class("mc-history-search-history")
             search.add_css_class("flat")
             search.add_css_class("mc-history-search-button")
             search.set_visible(True)
@@ -2255,12 +2275,12 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                 entry_parent.remove(search_entry)
             search_entry.set_hexpand(True)
             search_entry.set_max_width_chars(54)
-            new_parent.insert_child_after(search_entry, wrapper)
+            placement_parent.insert_child_after(search_entry, wrapper)
             host._header_location_widget = location_widget
         else:
             _log(
                 "search toggle parents unsupported: "
-                f"{type(old_parent).__name__} -> {type(new_parent).__name__}"
+                f"{type(old_parent).__name__} -> {type(placement_parent).__name__}"
             )
         return GLib.SOURCE_REMOVE
 

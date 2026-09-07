@@ -716,6 +716,12 @@ button.mc-trash-restore.suggested-action:hover {
 .mc-history-search-group button:active {
     background-color: @view_bg_color;
 }
+.mc-history-search-history {
+    background: transparent;
+    border-radius: 0;
+    margin: 0;
+    padding: 0;
+}
 .mc-history-search-group > nautilushistorycontrols,
 .mc-history-search-group > widget {
     margin: 0;

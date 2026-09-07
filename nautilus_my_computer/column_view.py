@@ -1295,14 +1295,19 @@ class _ColumnViewHost:
                 self._set_preview(reveal_uri, force_normal=True)
                 self._replace_preview_in_chain()
                 self._sync_column_selections()
-                # The column is now populated and the normal preview exists.
-                # This is the one—and only—scroll request for a GtCF jump.
-                # Starting an earlier alignment before async enumeration and
-                # another after the preview arrives made the destination
-                # visibly slide twice.
-                self._align_to_viewport_pos(column, 24)
-                column.with_selected_row(lambda row: None)
                 self._pending_reveal_uri = None
+                # Replace the temporary Search/Recent chain *before*
+                # deciding where to scroll. Previously the animation landed
+                # on that temporary canvas and promotion rebuilt a much wider
+                # real path underneath it, leaving the selected file offscreen
+                # in the middle of the tree.
+                self._finish_location_transition()
+                self._sync_column_selections()
+                self._apply_focused_column_style()
+                # One final animation, now against the permanent chain: the
+                # selected file column and its preview are its right edge.
+                self._scroll_to_viewport_end()
+                self._focus_column_when_mapped(column)
             return
         self._pending_child_focus = None
         if column not in self.columns:
@@ -2985,10 +2990,11 @@ class _ColumnViewHost:
         self._root_uri = self.columns[0].folder_uri
         self._reset_viewport_width()
         self._rebuild_chain()
+        # Promotion makes fresh ancestor columns. Re-drive selections after
+        # they are parented so keyboard navigation always starts from the
+        # blue selected file in the destination column.
+        self._sync_column_selections()
         self._apply_focused_column_style()
-        # Preserve the completed GtCF viewport. Re-aligning the same target
-        # after promoting its transient Search/Recent chain would start a
-        # second, unnecessary slide.
 
     def _rebuild_chain(self) -> None:
         old_root = getattr(self, "root", None)

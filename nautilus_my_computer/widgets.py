@@ -2409,7 +2409,23 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         self._cursor_index = None
         self._selection_anchor = None
 
-    def _on_content_changed(self, _monitor, _file, _other, _event):
+    def _on_content_changed(self, _monitor, file, other, event):
+        # A directory monitor reports CHANGED/ATTRIBUTE_CHANGED and a final
+        # CHANGES_DONE_HINT while a file is being written. Reloading for each
+        # one makes an active Chrome download blink even though the visible
+        # directory membership and names have not changed. Only membership
+        # events need a new enumeration; a completed download arrives as a
+        # MOVED/MOVED_IN event and is still picked up.
+        membership_events = {
+            Gio.FileMonitorEvent.CREATED,
+            Gio.FileMonitorEvent.DELETED,
+            Gio.FileMonitorEvent.MOVED,
+            Gio.FileMonitorEvent.MOVED_IN,
+            Gio.FileMonitorEvent.MOVED_OUT,
+            Gio.FileMonitorEvent.RENAMED,
+        }
+        if event not in membership_events:
+            return
         if self._content_refresh_id:
             GLib.source_remove(self._content_refresh_id)
         self._content_refresh_id = GLib.idle_add(self._reload_after_content_change)

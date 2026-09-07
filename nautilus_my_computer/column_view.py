@@ -942,6 +942,10 @@ class _ColumnViewHost:
         right_click.connect("pressed", self._on_column_background_right_clicked, column)
         column.add_controller(right_click)
         drop = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
+        # Gtk.ListView owns the column's child surface. Capture at the
+        # scrolled-window level so the blank space below/beside its rows is a
+        # valid destination instead of letting the list swallow the drag.
+        drop.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         drop.connect("enter", self._on_column_drop_motion)
         drop.connect("motion", self._on_column_drop_motion)
         drop.connect("drop", self._on_column_drop, column)

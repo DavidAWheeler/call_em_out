@@ -212,6 +212,25 @@ class ColumnInteractions(unittest.TestCase):
         self.assertEqual(opener.call_args.kwargs["launch_timestamp"], 1234)
         self.assertIsNone(host._launch_timestamp)
 
+    def test_directory_monitor_ignores_metadata_write_events(self):
+        host = MyComputerColumn.__new__(MyComputerColumn)
+        host._content_refresh_id = 0
+        with patch("nautilus_my_computer.widgets.GLib.idle_add") as schedule:
+            host._on_content_changed(
+                None, None, None, Gio.FileMonitorEvent.CHANGED
+            )
+        schedule.assert_not_called()
+
+    def test_directory_monitor_refreshes_on_membership_events(self):
+        host = MyComputerColumn.__new__(MyComputerColumn)
+        host._content_refresh_id = 0
+        with patch("nautilus_my_computer.widgets.GLib.idle_add", return_value=42) as schedule:
+            host._on_content_changed(
+                None, None, None, Gio.FileMonitorEvent.CREATED
+            )
+        schedule.assert_called_once_with(host._reload_after_content_change)
+        self.assertEqual(host._content_refresh_id, 42)
+
     def test_path_sync_clears_failed_drag_highlight(self):
         host = _ColumnViewHost.__new__(_ColumnViewHost)
         child = MyComputerColumn.__new__(MyComputerColumn)

@@ -2230,7 +2230,10 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             old_parent.remove(search)
             # Insert between the complete Back/Forward control and the
             # location/search input, so it participates in toolbar sizing.
-            search.set_margin_start(6)
+            search.set_margin_start(0)
+            search.set_margin_end(0)
+            search.add_css_class("linked")
+            nav_group.add_css_class("linked")
             search.set_visible(True)
             new_parent.insert_child_after(search, nav_group)
             entry_parent = search_entry.get_parent()

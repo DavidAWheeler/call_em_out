@@ -595,10 +595,9 @@ class _ColumnViewHost:
 
     def _on_search_toggled(self, button) -> None:
         enabled = button.get_active()
-        icon_name = "location-symbolic" if enabled else "search-folder-binoculars-symbolic"
-        icon = _bundled_gicon(icon_name)
-        if icon is not None:
-            button.set_child(Gtk.Image.new_from_gicon(icon))
+        # Keep one binocular/search pictogram; the linked-button relief and
+        # active state communicate the toggle without swapping to an ambiguous
+        # arrow or location glyph.
         self.search_entry.set_visible(enabled)
         location_widget = getattr(self, "_header_location_widget", None)
         location_widgets = getattr(self, "_header_location_widgets", [])

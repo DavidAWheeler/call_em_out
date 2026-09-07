@@ -2743,19 +2743,42 @@ def _format_datetime(unix_time: int) -> str:
 
 
 def _open_file_with_default_app(file_uri: str, cancellable: Gio.Cancellable) -> None:
-    """Launch file_uri with its default app. Shared by the preview column's
-    click handlers and file rows in the folder columns, so both surfaces open
-    a file the same way."""
-    Gio.AppInfo.launch_default_for_uri_async(
-        file_uri, None, cancellable, _on_launch_default_app_done
+    """Launch a file through its MIME handler, never its ``file://`` handler.
+
+    ``launch_default_for_uri_async`` resolves the URI scheme. Since Nautilus
+    is rightly the default handler for ``file://`` URLs, that API reopens a
+    Nautilus window for every ordinary document. Querying content type first
+    gives DOCX/PDF/etc. to their actual default applications instead.
+    """
+    gfile = Gio.File.new_for_uri(file_uri)
+
+    def _on_type_ready(source: Gio.File, result: Gio.AsyncResult) -> None:
+        try:
+            info = source.query_info_finish(result)
+        except GLib.Error as error:
+            _log(f"Could not identify application for {file_uri!r}: {error}")
+            return
+        content_type = info.get_content_type()
+        app = Gio.AppInfo.get_default_for_type(content_type, False) if content_type else None
+        if app is None:
+            _log(f"No default application for {file_uri!r} ({content_type!r})")
+            return
+        app.launch_uris_async([file_uri], None, cancellable, _on_launch_mime_app_done)
+
+    gfile.query_info_async(
+        "standard::content-type",
+        Gio.FileQueryInfoFlags.NONE,
+        GLib.PRIORITY_DEFAULT,
+        cancellable,
+        _on_type_ready,
     )
 
 
-def _on_launch_default_app_done(_source, result: Gio.AsyncResult) -> None:
+def _on_launch_mime_app_done(source: Gio.AppInfo, result: Gio.AsyncResult) -> None:
     try:
-        Gio.AppInfo.launch_default_for_uri_finish(result)
+        source.launch_uris_finish(result)
     except GLib.Error as e:
-        _log(f"Open-with-default failed: {e}")
+        _log(f"Open-with-default MIME handler failed: {e}")
 
 
 def _make_kv_row(title: str) -> tuple[Gtk.Box, Gtk.Label]:

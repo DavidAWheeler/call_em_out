@@ -708,6 +708,7 @@ button.mc-trash-restore.suggested-action:hover {
     border-radius: 7px;
     min-height: 0;
     padding: 0;
+    margin: 0;
 }
 .mc-history-search-group button.mc-toggle-btn:hover:not(:active),
 .mc-history-search-group .mc-history-search-history button:hover:not(:active) {

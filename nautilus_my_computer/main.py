@@ -2276,6 +2276,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             search.set_margin_start(0)
             search.set_margin_end(0)
             history.add_css_class("mc-history-search-history")
+            history.set_valign(Gtk.Align.FILL)
+            history.set_vexpand(True)
             # Native history buttons arrive with compact icon geometry while
             # our view switcher gives each icon 8px on either side. Normalize
             # the live buttons to that same geometry instead of merely making
@@ -2285,6 +2287,11 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                     continue
                 history_button.add_css_class("flat")
                 history_button.add_css_class("mc-toggle-btn")
+                # Native history controls default to their icon's natural
+                # height. In our shared pill that produced a thin hover band
+                # around the chevron instead of a full segment highlight.
+                history_button.set_valign(Gtk.Align.FILL)
+                history_button.set_vexpand(True)
                 image = next(
                     (child for child in _all_widgets(history_button)
                      if isinstance(child, Gtk.Image)),

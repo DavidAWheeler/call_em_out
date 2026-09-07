@@ -709,13 +709,13 @@ button.mc-trash-restore.suggested-action:hover {
     min-height: 0;
     padding: 0;
 }
-.mc-history-search-group button:hover,
-.mc-history-search-group button.flat:hover,
-.mc-history-search-history button:hover {
+.mc-history-search-group button.mc-toggle-btn:hover:not(:active),
+.mc-history-search-group .mc-history-search-history button:hover:not(:active) {
+    background-image: none;
     background-color: alpha(@window_fg_color, 0.07);
 }
-.mc-history-search-group button:checked,
-.mc-history-search-group button:active {
+.mc-history-search-group button.mc-toggle-btn:active {
+    background-image: none;
     background-color: @view_bg_color;
 }
 .mc-history-search-history {

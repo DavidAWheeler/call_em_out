@@ -1295,9 +1295,12 @@ class _ColumnViewHost:
                 self._set_preview(reveal_uri, force_normal=True)
                 self._replace_preview_in_chain()
                 self._sync_column_selections()
-                self._scroll_to_viewport_end()
-                if not self._column_fully_visible(self.columns.index(column)):
-                    self._align_to_viewport_pos(column, 24)
+                # The column is now populated and the normal preview exists.
+                # This is the one—and only—scroll request for a GtCF jump.
+                # Starting an earlier alignment before async enumeration and
+                # another after the preview arrives made the destination
+                # visibly slide twice.
+                self._align_to_viewport_pos(column, 24)
                 column.with_selected_row(lambda row: None)
                 self._pending_reveal_uri = None
             return
@@ -2901,7 +2904,6 @@ class _ColumnViewHost:
         self._pending_reveal_uri = file_uri
         self._rebuild_chain()
         self._sync_slot_location(folder_uri)
-        self._align_to_viewport_pos(destination, 24)
 
     def _finish_location_transition(self) -> None:
         old_preview = getattr(self, "_transition_preview", None)
@@ -2984,7 +2986,9 @@ class _ColumnViewHost:
         self._reset_viewport_width()
         self._rebuild_chain()
         self._apply_focused_column_style()
-        self._align_to_viewport_pos(destination, 24)
+        # Preserve the completed GtCF viewport. Re-aligning the same target
+        # after promoting its transient Search/Recent chain would start a
+        # second, unnecessary slide.
 
     def _rebuild_chain(self) -> None:
         old_root = getattr(self, "root", None)

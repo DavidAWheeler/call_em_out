@@ -1,15 +1,15 @@
 ```text
-                    $$\ $$\                                                           $$\
-                    $$ |$$ |                                                          $$ |
- $$$$$$$\  $$$$$$\  $$ |$$ |       $$$$$$\  $$$$$$\$$$$\         $$$$$$\  $$\   $$\ $$$$$$\
-$$  _____| \____$$\ $$ |$$ |      $$  __$$\ $$  _$$  _$$\       $$  __$$\ $$ |  $$ |\_$$  _|
-$$ /       $$$$$$$ |$$ |$$ |      $$$$$$$$ |$$ / $$ / $$ |      $$ /  $$ |$$ |  $$ |  $$ |
-$$ |      $$  __$$ |$$ |$$ |      $$   ____|$$ | $$ | $$ |      $$ |  $$ |$$ |  $$ |  $$ |$$\
-\$$$$$$$\ \$$$$$$$ |$$ |$$ |      \$$$$$$$\ $$ | $$ | $$ |      \$$$$$$  |\$$$$$$  |  \$$$$  |
- \_______| \_______|\__|\__|$$$$\   \_______|\__| \__| \__|$$$$\  \______/  \______/    \____/
-                            \____|                        \____|
+                    $$\ $$\                                                        $$\
+                    $$ |$$ |                                                       $$ |
+ $$$$$$$\  $$$$$$\  $$ |$$ |     $$$$$$\  $$$$$$\$$$$\        $$$$$$\  $$\   $$\ $$$$$$\
+$$  _____| \____$$\ $$ |$$ |    $$  __$$\ $$  _$$  _$$\      $$  __$$\ $$ |  $$ |\_$$  _|
+$$ /       $$$$$$$ |$$ |$$ |    $$$$$$$$ |$$ / $$ / $$ |     $$ /  $$ |$$ |  $$ |  $$ |
+$$ |      $$  __$$ |$$ |$$ |    $$   ____|$$ | $$ | $$ |     $$ |  $$ |$$ |  $$ |  $$ |$$\
+\$$$$$$$\ \$$$$$$$ |$$ |$$ |    \$$$$$$$\ $$ | $$ | $$ |     \$$$$$$  |\$$$$$$  |  \$$$$  |
+ \_______| \_______|\__|\__|$$$$\ \_______|\__| \__| \__|$$$$\ \______/  \______/    \____/
+                            \____|                       \____|
 
-       A sharper Column View for Nautilus, built on yannmasoch's My Computer for Nautilus
+    A sharper Column View for Nautilus, built on yannmasoch's My Computer for Nautilus
 ```
 
 `call_em_out` is a ramshackle attempt to improve the Column View work started by the person who made the plugin we forked: [My Computer for Nautilus](https://github.com/yannmasoch/nautilus-my-computer). The original author deserves credit for the extension, its Computer view, and the Column View foundation. This is a personal set of usability experiments on top of that work.

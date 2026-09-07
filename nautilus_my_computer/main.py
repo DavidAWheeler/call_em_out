@@ -2212,7 +2212,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         while nav_group is not None and type(nav_group).__name__ != "NautilusHistoryControls":
             nav_group = nav_group.get_parent()
         new_parent = nav_group.get_parent() if nav_group is not None else None
-        if isinstance(old_parent, (Gtk.Box, Gtk.Stack)) and isinstance(nav_group, Gtk.Box):
+        if isinstance(old_parent, (Gtk.Box, Gtk.Stack)) and isinstance(new_parent, Gtk.Box):
             location_widget = None
             sibling = nav_group.get_next_sibling()
             while sibling is not None:
@@ -2225,22 +2225,37 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                     location_widget = sibling
                     break
                 sibling = sibling.get_next_sibling()
-            old_parent.remove(search)
-            # Back, Forward, and Search are one linked control group. Search
-            # belongs inside NautilusHistoryControls, not beside it.
+            # NautilusHistoryControls is not a Gtk.Box on every supported
+            # Nautilus release, so appending Search *inside* it is unreliable.
+            # Instead wrap the real history control and our toggle in the
+            # same segmented shell used by Grid/List/Columns. Reparenting the
+            # controls preserves Nautilus's actions and history sensitivity.
+            wrapper = getattr(nav_group, "_mc_history_search_wrapper", None)
+            if wrapper is None:
+                before = nav_group.get_prev_sibling()
+                new_parent.remove(nav_group)
+                old_parent.remove(search)
+                wrapper = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=1)
+                wrapper.add_css_class("mc-history-search-group")
+                wrapper.set_valign(Gtk.Align.FILL)
+                wrapper.append(nav_group)
+                wrapper.append(search)
+                nav_group._mc_history_search_wrapper = wrapper
+                new_parent.insert_child_after(wrapper, before)
+            elif search.get_parent() is not wrapper:
+                old_parent.remove(search)
+                wrapper.append(search)
             search.set_margin_start(0)
             search.set_margin_end(0)
-            search.add_css_class("linked")
-            nav_group.add_css_class("linked")
+            search.add_css_class("flat")
+            search.add_css_class("mc-history-search-button")
             search.set_visible(True)
-            nav_group.append(search)
             entry_parent = search_entry.get_parent()
             if isinstance(entry_parent, (Gtk.Box, Gtk.Stack)):
                 entry_parent.remove(search_entry)
             search_entry.set_hexpand(True)
             search_entry.set_max_width_chars(54)
-            if isinstance(new_parent, Gtk.Box):
-                new_parent.insert_child_after(search_entry, nav_group)
+            new_parent.insert_child_after(search_entry, wrapper)
             host._header_location_widget = location_widget
         else:
             _log(

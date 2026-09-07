@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-  <path fill="#fff" d="M1.5 4.5h4l1.2 1.3H14a1 1 0 0 1 1 1v6.2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V5.5a1 1 0 0 1 .5-1z"/>
-  <circle cx="9" cy="8.7" r="2.3" fill="none" stroke="#fff" stroke-width="1.2"/>
-  <path fill="none" stroke="#fff" stroke-linecap="round" stroke-width="1.2" d="m10.7 10.4 2 2"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <!-- One stable pictogram for both states: folder plus binoculars. -->
+  <path d="M3.5 6.5h6l1.8 2H20a1.5 1.5 0 0 1 1.5 1.5v7.5A1.5 1.5 0 0 1 20 19H4a1.5 1.5 0 0 1-1.5-1.5V7.5a1 1 0 0 1 1-1z" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linejoin="round"/>
+  <path d="M8 13.1h2.5v3.3H8zM13.5 13.1H16v3.3h-2.5zM10.5 14.2h3M8 16.4l-1.2 1.5M16 16.4l1.2 1.5" fill="#ffffff" stroke="#ffffff" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

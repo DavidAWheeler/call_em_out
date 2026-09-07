@@ -693,6 +693,38 @@ button.mc-trash-restore.suggested-action:hover {
 .mc-toggle-sep.mc-toggle-sep-hidden {
     opacity: 0;
 }
+
+/* Back, Forward, and the Column View search toggle share this one shell.
+   NautilusHistoryControls changes its concrete widget type between releases,
+   so main.py wraps the live control rather than relying on its private
+   internals. The rules deliberately mirror .mc-toggle-group above. */
+.mc-history-search-group {
+    background-color: alpha(@window_fg_color, 0.07);
+    border-radius: 9px;
+    padding: 2px;
+    spacing: 1px;
+}
+.mc-history-search-group button {
+    background: transparent;
+    border-radius: 7px;
+    min-height: 0;
+    padding: 0;
+}
+.mc-history-search-group button:hover {
+    background-color: alpha(@window_fg_color, 0.07);
+}
+.mc-history-search-group button:checked,
+.mc-history-search-group button:active {
+    background-color: @view_bg_color;
+}
+.mc-history-search-group > nautilushistorycontrols,
+.mc-history-search-group > widget {
+    margin: 0;
+}
+.mc-history-search-button {
+    border-left: 1px solid alpha(@window_fg_color, 0.18);
+    border-radius: 0 7px 7px 0;
+}
 """
 
 

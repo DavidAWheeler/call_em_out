@@ -1836,6 +1836,7 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         sort: tuple[str, bool] = ("name", False),
         on_row_pressed=None,
         on_row_released=None,
+        on_file_open=None,
     ) -> None:
         super().__init__()
         self._ext = ext
@@ -1853,6 +1854,10 @@ class MyComputerColumn(Gtk.ScrolledWindow):
         # signature _ColumnViewHost._on_row_pressed/_released already expect.
         self._on_row_pressed = on_row_pressed
         self._on_row_released = on_row_released
+        # The host may claim files whose normal activation is navigation
+        # rather than an external application launch (archives are mounted
+        # and browsed in the active Miller branch, for example).
+        self._on_file_open = on_file_open
         self._drop_hover_id = 0
         self._drop_hover_row = None
         self._content_monitor = None
@@ -2714,7 +2719,8 @@ class MyComputerColumn(Gtk.ScrolledWindow):
             # opens it, no timing needed -- it already selected/previewed on
             # the click before this one. Double policy: only a genuine repeat
             # click within the double-click window opens it.
-            _open_file_with_default_app(row.uri, self._cancellable)
+            if not (callable(self._on_file_open) and self._on_file_open(row)):
+                _open_file_with_default_app(row.uri, self._cancellable)
             return
 
         self._on_row_activated(self, row)
@@ -2786,11 +2792,17 @@ class MyComputerPreviewColumn(Gtk.Box):
     __gtype_name__ = "MyComputerPreviewColumn"
 
     def __init__(
-        self, ext, file_uri: str | None, *, go_to_folder_uri: str | None = None
+        self,
+        ext,
+        file_uri: str | None,
+        *,
+        go_to_folder_uri: str | None = None,
+        open_file_callback=None,
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self._ext = ext
         self.file_uri = file_uri
+        self._open_file_callback = open_file_callback
         self._go_to_folder_uri = go_to_folder_uri
         self._cancellable = Gio.Cancellable()
         self._discoverer = None
@@ -3041,18 +3053,23 @@ class MyComputerPreviewColumn(Gtk.Box):
         single_click = self._ext._nautilus_prefs.click_policy == "single"
         self._activate_on_release = single_click and n_press == 1 and not selection_mode
         if not single_click and n_press == 2 and not selection_mode:
-            _open_file_with_default_app(self.file_uri, self._cancellable)
+            self._open_file()
             gesture.set_state(Gtk.EventSequenceState.CLAIMED)
 
     def _on_preview_area_released(
         self, _gesture: Gtk.GestureClick, _n_press: int, _x: float, _y: float
     ) -> None:
         if self._activate_on_release:
-            _open_file_with_default_app(self.file_uri, self._cancellable)
+            self._open_file()
         self._activate_on_release = False
 
     def _on_preview_area_stopped(self, _gesture: Gtk.GestureClick) -> None:
         self._activate_on_release = False
+
+    def _open_file(self) -> None:
+        if callable(self._open_file_callback) and self._open_file_callback(self.file_uri):
+            return
+        _open_file_with_default_app(self.file_uri, self._cancellable)
 
     def _load(self) -> None:
         gfile = Gio.File.new_for_uri(self.file_uri)

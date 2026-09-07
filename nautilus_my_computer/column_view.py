@@ -895,6 +895,7 @@ class _ColumnViewHost:
             sort=self._sort,
             on_row_pressed=self._on_row_pressed,
             on_row_released=self._on_row_released,
+            on_file_open=self._open_column_file,
         )
         right_click = Gtk.GestureClick(button=3)
         right_click.connect("pressed", self._on_column_background_right_clicked, column)
@@ -911,6 +912,94 @@ class _ColumnViewHost:
         column._perform_drop = self._perform_drop_to
         column._choose_drop_action = self._on_column_drop_motion
         return column
+
+    @staticmethod
+    def _is_browsable_archive(content_type: str | None, uri: str) -> bool:
+        """Return whether a file should open as a mounted GVFS archive."""
+        archive_types = (
+            "zip",
+            "tar",
+            "gzip",
+            "bzip",
+            "xz",
+            "7z",
+            "rar",
+            "cpio",
+            "iso",
+        )
+        if content_type and any(token in content_type.casefold() for token in archive_types):
+            return True
+        return uri.casefold().split("?", 1)[0].endswith(
+            (".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".7z", ".rar", ".iso", ".cpio")
+        )
+
+    @staticmethod
+    def _archive_mount_for_uri(uri: str):
+        """Find the existing GVFS archive mount backed by ``uri``."""
+        for mount in Gio.VolumeMonitor.get().get_mounts():
+            root = mount.get_root()
+            root_uri = root.get_uri() if root is not None else ""
+            decoded = root_uri
+            # GVFS encodes the source file URI as a component of archive://,
+            # hence the two rounds visible in archive mount roots.
+            for _unused in range(3):
+                next_decoded = GLib.uri_unescape_string(decoded, None)
+                if not next_decoded or next_decoded == decoded:
+                    break
+                decoded = next_decoded
+            if root_uri.startswith("archive://") and uri in decoded:
+                return root_uri
+        return None
+
+    def _open_column_file(self, row: Gtk.Widget) -> bool:
+        if not self._is_browsable_archive(row.content_type, row.uri):
+            return False
+        self._browse_archive(row.uri)
+        return True
+
+    def _open_file(self, file_uri: str | None) -> bool:
+        if not file_uri or not self._is_browsable_archive(None, file_uri):
+            return False
+        self._browse_archive(file_uri)
+        return True
+
+    def _browse_archive(self, archive_uri: str) -> None:
+        """Mount an archive through GVFS, then browse its root in this slot."""
+        existing = self._archive_mount_for_uri(archive_uri)
+        if existing is not None:
+            self.reset(existing)
+            self._sync_slot_location(existing)
+            return
+        executable = "/usr/libexec/gvfsd-archive"
+        if not os.path.exists(executable):
+            _log("GVFS archive backend is unavailable; using the file default")
+            _open_file_with_default_app(archive_uri, Gio.Cancellable())
+            return
+        try:
+            Gio.Subprocess.new(
+                [executable, f"file={archive_uri}"],
+                Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE,
+            )
+        except GLib.Error as exc:
+            _log(f"Could not start GVFS archive backend: {exc}")
+            _open_file_with_default_app(archive_uri, Gio.Cancellable())
+            return
+        attempts = {"remaining": 30}
+
+        def _wait_for_mount() -> bool:
+            mounted_uri = self._archive_mount_for_uri(archive_uri)
+            if mounted_uri is not None:
+                self.reset(mounted_uri)
+                self._sync_slot_location(mounted_uri)
+                return GLib.SOURCE_REMOVE
+            attempts["remaining"] -= 1
+            if attempts["remaining"] <= 0:
+                _log(f"GVFS archive mount did not appear for {archive_uri!r}")
+                _open_file_with_default_app(archive_uri, Gio.Cancellable())
+                return GLib.SOURCE_REMOVE
+            return GLib.SOURCE_CONTINUE
+
+        GLib.timeout_add(50, _wait_for_mount)
 
     def _prepare_drag_uri(self, uri: str) -> str:
         """Materialize a Trash item before handing it to desktop DND.
@@ -2740,7 +2829,7 @@ class _ColumnViewHost:
     def _make_preview_column(self) -> Gtk.Widget:
         # Starts empty (nothing selected yet); a fresh preview is built each
         # time a file is clicked (see _set_preview).
-        return MyComputerPreviewColumn(self._ext, None)
+        return MyComputerPreviewColumn(self._ext, None, open_file_callback=self._open_file)
 
     def _set_preview(
         self, file_uri: str | None, *, search_result: bool = False, force_normal: bool = False
@@ -2755,13 +2844,21 @@ class _ColumnViewHost:
         is_result = not force_normal and (
             search_result
             or getattr(self, "search_result_column", None) is not None
-            or self._root_uri.startswith("recent:")
+            # A Recent result remains the root only during the transition.
+            # Once Go to Containing Folder promotes a real filesystem branch,
+            # the old recent:/// root is deliberately retained only as a
+            # transition detail and must not leak result-only controls back
+            # into an ordinary preview.
+            or (self._root_uri.startswith("recent:") and not self._retained_navigation)
         )
         if is_result and file_uri:
             parent = Gio.File.new_for_uri(file_uri).get_parent()
             go_to_folder = parent.get_uri() if parent is not None else None
         self.preview_column = MyComputerPreviewColumn(
-            self._ext, file_uri, go_to_folder_uri=go_to_folder
+            self._ext,
+            file_uri,
+            go_to_folder_uri=go_to_folder,
+            open_file_callback=self._open_file,
         )
         if go_to_folder:
             self.preview_column._containing_folder_callback = functools.partial(
@@ -2864,9 +2961,11 @@ class _ColumnViewHost:
         # containing-folder button) so the destination feels like a normal
         # folder browse rather than a result-provider view.
         selected_uri = getattr(self.preview_column, "file_uri", None)
-        if selected_uri:
-            self._set_preview(selected_uri)
         self._retained_navigation = True
+        if selected_uri:
+            # This is a real folder column now, not a Recent/Search result.
+            # Be explicit so a stale virtual root can never restore GtCF.
+            self._set_preview(selected_uri, force_normal=True)
         self._history_index = len(self.columns) - 1
         self.focused_index = self._history_index
         self._containing_location_uri = None

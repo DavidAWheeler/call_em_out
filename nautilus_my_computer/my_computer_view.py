@@ -702,7 +702,6 @@ button.mc-trash-restore.suggested-action:hover {
     background-color: alpha(@window_fg_color, 0.07);
     border-radius: 9px;
     padding: 2px;
-    spacing: 1px;
 }
 .mc-history-search-group button {
     background: transparent;

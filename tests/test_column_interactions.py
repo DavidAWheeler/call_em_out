@@ -202,6 +202,16 @@ class ColumnInteractions(unittest.TestCase):
         opener.assert_called_once()
         self.assertEqual(opener.call_args.args[0], "file:///tmp/report.html")
 
+    def test_row_activation_uses_same_mime_handler_path(self):
+        host = _ColumnViewHost.__new__(_ColumnViewHost)
+        host._launch_timestamp = 1234
+        row = SimpleNamespace(uri="file:///tmp/report.html", content_type="text/html")
+        with patch("nautilus_my_computer.column_view._open_file_with_default_app") as opener:
+            self.assertTrue(host._open_column_file(row))
+        opener.assert_called_once()
+        self.assertEqual(opener.call_args.kwargs["launch_timestamp"], 1234)
+        self.assertIsNone(host._launch_timestamp)
+
     def test_path_sync_clears_failed_drag_highlight(self):
         host = _ColumnViewHost.__new__(_ColumnViewHost)
         child = MyComputerColumn.__new__(MyComputerColumn)

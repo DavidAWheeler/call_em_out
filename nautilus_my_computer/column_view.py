@@ -989,9 +989,16 @@ class _ColumnViewHost:
         return None
 
     def _open_column_file(self, row: Gtk.Widget) -> bool:
-        if not self._is_browsable_archive(row.content_type, row.uri):
-            return False
-        self._browse_archive(row.uri)
+        if self._is_browsable_archive(row.content_type, row.uri):
+            self._browse_archive(row.uri)
+            return True
+        # Claim ordinary files here as well, so row activation uses the same
+        # MIME path as previews and preserves the click timestamp for focus.
+        launch_timestamp = getattr(self, "_launch_timestamp", None)
+        self._launch_timestamp = None
+        _open_file_with_default_app(
+            row.uri, Gio.Cancellable(), launch_timestamp=launch_timestamp
+        )
         return True
 
     def _browse_archive(self, archive_uri: str) -> None:

@@ -22,6 +22,7 @@ from nautilus_my_computer.common import (
     _,
     _all_widgets,
     _bundled_gicon,
+    bundled_icon_path,
     _icon_name_renders,
     _log,
     _native,
@@ -565,9 +566,12 @@ class _ColumnViewHost:
         search_bar.set_visible(False)
         self._search_control_holder = search_bar
         self.search_toggle = Gtk.ToggleButton()
-        search_icon = _bundled_gicon("search-folder-binoculars-symbolic")
-        if search_icon is not None:
-            self.search_toggle.set_child(Gtk.Image.new_from_gicon(search_icon))
+        search_icon_path = bundled_icon_path("search-folder-binoculars-symbolic")
+        if search_icon_path is not None:
+            # Gtk.Image's file loader renders the supplied SVG itself. A
+            # FileIcon is sometimes treated as a generic folder by Nautilus's
+            # themed icon machinery, hiding the binocular overlay.
+            self.search_toggle.set_child(Gtk.Image.new_from_file(search_icon_path))
         else:
             self.search_toggle.set_icon_name("system-search-symbolic")
         self.search_toggle.set_tooltip_text(_("Search files"))
@@ -1189,7 +1193,7 @@ class _ColumnViewHost:
                 # Go to Containing Folder should land exactly as ordinary
                 # navigation would: the requested file is selected and its
                 # preview is the rightmost pane, with no empty placeholder.
-                self._set_preview(reveal_uri)
+                self._set_preview(reveal_uri, force_normal=True)
                 self._replace_preview_in_chain()
                 self._sync_column_selections()
                 self._scroll_to_viewport_end()
@@ -2738,7 +2742,9 @@ class _ColumnViewHost:
         # time a file is clicked (see _set_preview).
         return MyComputerPreviewColumn(self._ext, None)
 
-    def _set_preview(self, file_uri: str | None, *, search_result: bool = False) -> None:
+    def _set_preview(
+        self, file_uri: str | None, *, search_result: bool = False, force_normal: bool = False
+    ) -> None:
         # The preview is rebuilt (never updated in place) on every navigation:
         # cancel the old one's async work and swap in a fresh widget. The old
         # widget is detached from the paned chain by the next _rebuild_chain.
@@ -2746,7 +2752,7 @@ class _ColumnViewHost:
         if old is not None:
             old.destroy_enumeration()
         go_to_folder = None
-        is_result = (
+        is_result = not force_normal and (
             search_result
             or getattr(self, "search_result_column", None) is not None
             or self._root_uri.startswith("recent:")

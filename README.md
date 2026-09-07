@@ -29,11 +29,11 @@ Open Files again. The installer puts the extension in your user data directory; 
 
 - Search results, nested folders, and previews share the ordinary column
   layout: drill right, keep the parent trail, and preview after the last folder.
-- **Go to Containing Folder** slides the destination in from the right, keeps
-  the prior trail mounted, and selects the file from either Search or Recent.
+- **Go to Containing Folder** slides the destination in from the right, selects
+  the file, and then turns the view into ordinary folder browsing.
 - More dependable Ctrl/Shift multi-selection, including selection that survives refreshes.
-- Multi-file drag and drop: local moves by default, remote/NAS transfers copy,
-  Ctrl copies, and Shift moves.
+- Multi-file drag and drop: local and mounted-NAS moves by default, genuinely
+  remote transfers copy, Ctrl copies, and Shift moves.
 - Direct folder-row drops plus hover navigation into deeper folders.
 - Faster live refresh after file operations and external changes.
 - A real Trash Column View with metadata, Restore, Delete Permanently, and

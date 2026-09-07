@@ -45,6 +45,10 @@ it does not cover the results or their children. **Go to Containing Folder**
 opens the directory and selects the file. The same button works in Recent,
 whose entries resolve to their actual file locations.
 
+After that jump completes, the result context is retired: the selected file
+uses the ordinary folder preview and no longer shows **Go to Containing
+Folder**, because it is already there.
+
 Plain-text, configuration, and common code files show a bounded, read-only
 excerpt. HTML gets a safe reader view with headings, emphasis, lists, and code;
 scripts, styles, and remote resources are never loaded. PDF thumbnails request

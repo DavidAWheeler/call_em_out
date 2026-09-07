@@ -283,14 +283,49 @@ remove_conflicting_system_install() {
     fi
 }
 
-# --- Dependency check ---
-check_dependencies() {
-    missing="" tools="python3 glib-compile-schemas gsettings"
-    [ "$INSTALL_SOURCE" = "remote" ] && tools="curl tar $tools"
-    for tool in $tools; do
+# --- Runtime dependencies ------------------------------------------------------
+ensure_runtime_dependencies() {
+    missing=""
+    for tool in python3 glib-compile-schemas gsettings; do
         command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
     done
-    [ -z "$missing" ] || die "Required tools missing:$missing"
+    if [ "$INSTALL_SOURCE" = "remote" ]; then
+        for tool in curl tar; do
+            command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+        done
+    fi
+    [ -z "$missing" ] && return
+    line "Runtime tools" "missing:$missing; installing..."
+    case "$PM" in
+        pacman) $SUDO pacman -S --noconfirm python glib2 curl tar ;;
+        apt)    $SUDO apt-get install -y python3 libglib2.0-bin curl tar ;;
+        dnf)    $SUDO dnf install -y python3 glib2 curl tar ;;
+        zypper) $SUDO zypper install -y python3 glib2 curl tar ;;
+    esac
+    for tool in python3 glib-compile-schemas gsettings; do
+        command -v "$tool" >/dev/null 2>&1 || die "Required tool missing after install: $tool"
+    done
+}
+
+ensure_nautilus_directory_default() {
+    command -v xdg-mime >/dev/null 2>&1 || return
+    current=$(xdg-mime query default inode/directory 2>/dev/null || true)
+    [ "$current" = "org.gnome.Nautilus.desktop" ] && return
+    printf '%s\n' "Nautilus is not the current directory handler (${current:-none})."
+    if [ -t 0 ]; then
+        printf '%s' "Make Nautilus the default Files app? [Y/n] "
+        read answer || answer=""
+    else
+        answer=""
+    fi
+    case "$answer" in
+        n|N|no|NO) line "Files default" "left unchanged" ;;
+        *)
+            xdg-mime default org.gnome.Nautilus.desktop inode/directory
+            xdg-mime default org.gnome.Nautilus.desktop application/x-gnome-saved-search
+            line "Files default" "Nautilus"
+            ;;
+    esac
 }
 
 # --- Resolve ref ---
@@ -403,7 +438,6 @@ restart_nautilus() {
 # --- INSTALL ---
 do_install() {
     echo ""
-    check_dependencies
 
     printf '%s\n' "${BOLD}Install type${RESET}"
     if [ "$INSTALL_SOURCE" = "remote" ]; then
@@ -424,6 +458,7 @@ do_install() {
     printf '%s\n' "${BOLD}System${RESET}"
     detect_os
     detect_pm
+    ensure_runtime_dependencies
     ensure_nautilus_python
     ensure_gettext
     remove_conflicting_system_install
@@ -436,6 +471,7 @@ do_install() {
         [ -n "$ver" ] && line "Version" "v$ver (latest)"
     fi
     install_files
+    ensure_nautilus_directory_default
 
     echo ""
     printf '%s\n' "${BOLD}${CYAN}🚀 Installation complete!${RESET}"

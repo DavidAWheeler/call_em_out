@@ -2211,10 +2211,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         nav_group = forward
         while nav_group is not None and type(nav_group).__name__ != "NautilusHistoryControls":
             nav_group = nav_group.get_parent()
-        while nav_group is not None and not isinstance(nav_group.get_parent(), Gtk.Box):
-            nav_group = nav_group.get_parent()
         new_parent = nav_group.get_parent() if nav_group is not None else None
-        if isinstance(old_parent, (Gtk.Box, Gtk.Stack)) and isinstance(new_parent, Gtk.Box):
+        if isinstance(old_parent, (Gtk.Box, Gtk.Stack)) and isinstance(nav_group, Gtk.Box):
             location_widget = None
             sibling = nav_group.get_next_sibling()
             while sibling is not None:
@@ -2228,20 +2226,21 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                     break
                 sibling = sibling.get_next_sibling()
             old_parent.remove(search)
-            # Insert between the complete Back/Forward control and the
-            # location/search input, so it participates in toolbar sizing.
+            # Back, Forward, and Search are one linked control group. Search
+            # belongs inside NautilusHistoryControls, not beside it.
             search.set_margin_start(0)
             search.set_margin_end(0)
             search.add_css_class("linked")
             nav_group.add_css_class("linked")
             search.set_visible(True)
-            new_parent.insert_child_after(search, nav_group)
+            nav_group.append(search)
             entry_parent = search_entry.get_parent()
             if isinstance(entry_parent, (Gtk.Box, Gtk.Stack)):
                 entry_parent.remove(search_entry)
             search_entry.set_hexpand(True)
             search_entry.set_max_width_chars(54)
-            new_parent.insert_child_after(search_entry, search)
+            if isinstance(new_parent, Gtk.Box):
+                new_parent.insert_child_after(search_entry, nav_group)
             host._header_location_widget = location_widget
         else:
             _log(

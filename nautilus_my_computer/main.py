@@ -2276,7 +2276,29 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             search.set_margin_start(0)
             search.set_margin_end(0)
             history.add_css_class("mc-history-search-history")
+            # Native history buttons arrive with compact icon geometry while
+            # our view switcher gives each icon 8px on either side. Normalize
+            # the live buttons to that same geometry instead of merely making
+            # their outer wrapper look similar.
+            for history_button in (back, forward):
+                if history_button is None:
+                    continue
+                history_button.add_css_class("flat")
+                history_button.add_css_class("mc-toggle-btn")
+                image = next(
+                    (child for child in _all_widgets(history_button)
+                     if isinstance(child, Gtk.Image)),
+                    None,
+                )
+                if image is not None:
+                    image.set_pixel_size(16)
+                    image.set_margin_start(8)
+                    image.set_margin_end(8)
+            history_button_parent = back.get_parent() if back is not None else None
+            if isinstance(history_button_parent, Gtk.Box) and forward is not None:
+                history_button_parent.set_spacing(1)
             search.add_css_class("flat")
+            search.add_css_class("mc-toggle-btn")
             search.add_css_class("mc-history-search-button")
             search.set_visible(True)
             entry_parent = search_entry.get_parent()

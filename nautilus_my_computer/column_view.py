@@ -571,9 +571,19 @@ class _ColumnViewHost:
             # Gtk.Image's file loader renders the supplied SVG itself. A
             # FileIcon is sometimes treated as a generic folder by Nautilus's
             # themed icon machinery, hiding the binocular overlay.
-            self.search_toggle.set_child(Gtk.Image.new_from_file(search_icon_path))
+            search_image = Gtk.Image.new_from_file(search_icon_path)
+            # Match every segment in the Grid/List/Column switcher: its
+            # 16px icon carries 8px horizontal margins inside the button.
+            search_image.set_pixel_size(16)
+            search_image.set_margin_start(8)
+            search_image.set_margin_end(8)
+            self.search_toggle.set_child(search_image)
         else:
-            self.search_toggle.set_icon_name("system-search-symbolic")
+            search_image = Gtk.Image.new_from_icon_name("system-search-symbolic")
+            search_image.set_pixel_size(16)
+            search_image.set_margin_start(8)
+            search_image.set_margin_end(8)
+            self.search_toggle.set_child(search_image)
         self.search_toggle.set_tooltip_text(_("Search files"))
         self.search_toggle.set_visible(False)
         self.search_entry = Gtk.SearchEntry()

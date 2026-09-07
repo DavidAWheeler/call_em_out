@@ -57,11 +57,18 @@ larger filename sits above a bordered preview surface; type and size follow it,
 while **Go to Containing Folder** remains at the bottom. Search and Recent
 previews show the selected file's full path in a selectable **Location** row.
 
+Files open through their MIME-default desktop application rather than another
+Files window. Archive files themselves open as folders in Column View. When an
+application opens a member from a mounted archive, the extension gives it a
+local file: GVFS's local mount path is used when available; otherwise only that
+member is copied to a private temporary file and removed after the application
+has had time to read it.
+
 The original project remains the reference for installation, upstream behavior, translations, and general architecture. Native Grid and List views remain the fallback when a behavior is not yet reliable in this fork.
 
 ## Shortcuts and interaction
 
-`Ctrl+3` selects Column View. `Left` and `Right` move between columns; vertical arrows move within a column; `Shift` extends a range; `Ctrl+A` selects all; `Enter` opens the current item; `Backspace` requests the parent; `Ctrl+C`, `Ctrl+X`, and `Ctrl+V` copy, cut, and paste; `F2` renames; `Delete` moves the selected group to Trash.
+`Ctrl+3` selects Column View. `Left` and `Right` move between columns; vertical arrows move within the blue selected column; `Shift` extends a range; `Ctrl+A` selects all; `Enter` opens the current item; `Backspace` requests the parent; `Ctrl+C`, `Ctrl+X`, and `Ctrl+V` copy, cut, and paste; `F2` renames; `Delete` moves the selected group to Trash. A click, a completed **Go to Containing Folder** jump, and a cancelled drag all make their blue row the next arrow-key origin.
 
 Dragging a selected group onto a folder row transfers it directly; waiting on
 the row also opens the folder so deeper destinations can be chosen. Back moves
@@ -93,4 +100,5 @@ move it to the requested destination. Link creation is not offered by Column
 View rows. A Nautilus update can change the private widgets this extension
 integrates with.
 
-See [FEATURE_MATRIX.md](FEATURE_MATRIX.md) for percentages, current behavior, known bugs, next work, and the intended finish line for each feature.
+See [FEATURE_MATRIX.md](FEATURE_MATRIX.md) for current behavior, known bugs,
+next work, and the intended finish line for each feature.

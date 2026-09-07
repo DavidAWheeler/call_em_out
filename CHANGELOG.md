@@ -2,6 +2,13 @@
 
 ## Unreleased (personal fork)
 
+- Made the blue selected row the consistent Arrow-key origin after direct
+  selection, cancelled drag restoration, and Go to Containing Folder.
+- Kept the header search entry the same width as the path widget when toggled.
+- Open archive members with their MIME-default application by using GVFS's
+  local mount path or a private temporary copy when no path exists.
+- Reorganized the README around browsing, previewing, and file work, with
+  current limitations stated alongside the feature list.
 - Improved Column View selection, multi-file drag and drop, folder hover
   navigation, refresh handling, and group-aware Move to Trash.
 - Added Trash preview metadata and Restore/Delete Permanently actions, with

@@ -27,26 +27,41 @@ Open Files again. The installer puts the extension in your user data directory; 
 
 ## What's working
 
-- Search results, nested folders, and previews share the ordinary column
-  layout: drill right, keep the parent trail, and preview after the last folder.
-- **Go to Containing Folder** slides the destination in from the right, selects
-  the file, and then turns the view into ordinary folder browsing.
-- More dependable Ctrl/Shift multi-selection, including selection that survives refreshes.
+### Browse and navigate
+
+- Search results, nested folders, Recent, and previews use one column layout:
+  drill right, keep the parent trail, and preview after the last folder.
+- **Go to Containing Folder** slides the destination in from the right,
+  selects the file, and returns the pane to ordinary folder browsing.
+- Arrow keys begin from the blue selection: the last clicked row, keyboard
+  move, restored cancelled-drag selection, or containing-folder destination.
+- Sliding Back navigation, including Back inside Search, keeps the next
+  column peeking on deck. Bookmark jumps reset stale scroll, and resizing
+  reveals hidden columns before stretching the preview.
+- Sidebar bookmarks always become the first Column View column, including a
+  repeated click on the current location.
+
+### Open and preview
+
+- Files open through the desktop's MIME-default application. Archive members
+  open there too: when GVFS cannot give the application a local archive path,
+  the selected member is privately materialized first.
+- Plain-text, config/code, and safe reader-style HTML previews have the
+  filename above a bordered document surface, readable PDF thumbnails, and
+  full-path location details.
+- Header search uses a stable-width field and live Column View results with
+  file-result previews.
+
+### Work with files
+
+- More dependable Ctrl/Shift multi-selection, including selection that
+  survives refreshes.
 - Multi-file drag and drop: local and mounted-NAS moves by default, genuinely
   remote transfers copy, Ctrl copies, and Shift moves.
 - Direct folder-row drops plus hover navigation into deeper folders.
 - Faster live refresh after file operations and external changes.
 - A real Trash Column View with metadata, Restore, Delete Permanently, and
   destination-aware drag-out.
-- Header search with live Column View results and file-result previews.
-- Plain-text, config/code, and safe reader-style HTML previews with the
-  filename above a bordered document surface, readable PDF thumbnails, and
-  full-path location details.
-- Sliding Back navigation, including Back inside Search, keeps the next
-  column peeking on deck; bookmark jumps reset stale scroll, and resizing
-  reveals hidden columns before stretching the preview.
-- Sidebar bookmarks always become the first Column View column, including a
-  repeated click on the current location.
 
 The fork does not replace Nautilus or claim to be a new file manager. It keeps
 native Grid and List views available.
@@ -57,8 +72,8 @@ The desktop shell can still choose to show its own drop-action menu for a
 cross-application Trash drag; folder drops inside Nautilus are move-only.
 Search scope is intentionally bounded, and Recent remains dependent on the
 underlying `recent:///` provider's metadata. Pinned folders reorder by drag;
-drive and partition cards reorder from their context menus. Private widget
-names can also change between releases.
+drive and partition cards reorder from their context menus. Private Nautilus
+widget names can change between releases.
 
 ## What's next
 

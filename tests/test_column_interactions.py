@@ -163,7 +163,9 @@ class ColumnInteractions(unittest.TestCase):
 
     def test_cancelled_drag_restores_previous_selection(self):
         host = _ColumnViewHost.__new__(_ColumnViewHost)
-        host.columns = [self.column]
+        other = Mock()
+        host.columns = [self.column, other]
+        host.focused_index = 1
         host._sync_column_selections = Mock()
         host._apply_focused_column_style = Mock()
         self.column.select_index(1)
@@ -171,7 +173,25 @@ class ColumnInteractions(unittest.TestCase):
         self.column.select_index(4)
         host._restore_drag_selection(snapshot)
         self.assertEqual(self.column.selected_item().uri, "file:///tmp/1")
+        self.assertEqual(host.focused_index, 0)
         host._sync_column_selections.assert_called_once_with()
+
+    def test_plain_click_moves_keyboard_origin_to_its_blue_column(self):
+        other = object()
+        host = SimpleNamespace(
+            _cancel_row_commit=Mock(),
+            columns=[other, self.column],
+            focused_index=0,
+            _apply_focused_column_style=Mock(),
+        )
+        gesture = Mock()
+        gesture.get_current_button.return_value = Gdk.BUTTON_PRIMARY
+        gesture.get_current_event_state.return_value = Gdk.ModifierType(0)
+        _ColumnViewHost._on_row_pressed(
+            host, gesture, 1, 1, 1, self.column, SimpleNamespace(uri="file:///tmp/2")
+        )
+        self.assertEqual(host.focused_index, 1)
+        self.assertEqual(self.column.selected_item().uri, "file:///tmp/2")
 
     def test_path_sync_clears_failed_drag_highlight(self):
         host = _ColumnViewHost.__new__(_ColumnViewHost)

@@ -11,6 +11,8 @@ through the injected `ext` instance.
 import collections
 import dataclasses
 import math
+import os
+import tempfile
 import threading
 from html.parser import HTMLParser
 
@@ -2763,7 +2765,60 @@ def _open_file_with_default_app(file_uri: str, cancellable: Gio.Cancellable) -> 
         if app is None:
             _log(f"No default application for {file_uri!r} ({content_type!r})")
             return
-        app.launch_uris_async([file_uri], None, cancellable, _on_launch_mime_app_done)
+        # Applications such as Okular do not implement archive:// themselves.
+        # GVFS exposes mounted archive members through its FUSE path, which is
+        # the local file URL those applications can actually open.
+        def _launch(launch_uri: str) -> None:
+            app.launch_uris_async([launch_uri], None, cancellable, _on_launch_mime_app_done)
+
+        if gfile.get_uri_scheme() != "archive":
+            _launch(file_uri)
+            return
+        mounted_path = gfile.get_path()
+        if mounted_path:
+            _launch(Gio.File.new_for_path(mounted_path).get_uri())
+            return
+
+        # Some GVFS builds expose archive:// through GIO but not FUSE, so
+        # there is no local path for a conventional document viewer to open.
+        # Copy just the requested member to a private temporary file, launch
+        # it locally, then remove it after the viewer has had ample time to
+        # read it.
+        basename = gfile.get_basename() or "archive-member"
+        suffix = os.path.splitext(basename)[1]
+        fd, temp_path = tempfile.mkstemp(prefix="nautilus-archive-", suffix=suffix)
+        os.close(fd)
+        temporary = Gio.File.new_for_path(temp_path)
+
+        def _on_materialized(_source: Gio.File, copy_result: Gio.AsyncResult) -> None:
+            try:
+                gfile.copy_finish(copy_result)
+            except GLib.Error as error:
+                _log(f"Could not materialize archive member {file_uri!r}: {error}")
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+                return
+            _launch(temporary.get_uri())
+
+            def _remove_materialized() -> bool:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+                return GLib.SOURCE_REMOVE
+
+            GLib.timeout_add_seconds(15 * 60, _remove_materialized)
+
+        gfile.copy_async(
+            temporary,
+            Gio.FileCopyFlags.OVERWRITE,
+            GLib.PRIORITY_DEFAULT,
+            cancellable,
+            None,
+            _on_materialized,
+        )
 
     gfile.query_info_async(
         "standard::content-type",

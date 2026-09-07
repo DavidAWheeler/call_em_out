@@ -644,6 +644,32 @@ class _ColumnViewHost:
                 location_widget = direct_child
                 self._header_location_widget = direct_child
         if location_widget is not None:
+            if enabled:
+                # The native path widget and our entry share this header slot.
+                # Snapshot its allocated width before hiding it so toggling
+                # Search never makes the field jump between natural and
+                # expanded widths.
+                width = location_widget.get_width()
+                if width > 0:
+                    self._search_entry_width = width
+                width = getattr(self, "_search_entry_width", 0)
+                if width > 0:
+                    self.search_entry.set_size_request(width, -1)
+                    self.search_entry.set_hexpand(False)
+                else:
+                    # A newly opened window can map the path widget one
+                    # frame after its search button. Capture that allocation
+                    # rather than letting the first search field fall back to
+                    # SearchEntry's smaller natural width.
+                    def lock_late_allocation() -> bool:
+                        late_width = location_widget.get_width()
+                        if late_width > 0:
+                            self._search_entry_width = late_width
+                            self.search_entry.set_size_request(late_width, -1)
+                            self.search_entry.set_hexpand(False)
+                        return GLib.SOURCE_REMOVE
+
+                    GLib.idle_add(lock_late_allocation)
             location_widget.set_visible(not enabled)
         if enabled:
             self._search_origin_uri = self._root_uri
@@ -1127,6 +1153,10 @@ class _ColumnViewHost:
             if isinstance(anchor_uri, int)
             else column._index_for_uri(anchor_uri) if anchor_uri else None
         )
+        # The restored blue row is also the next keyboard-navigation origin.
+        # Without this, Esc can put the visible selection back in one column
+        # while Left/Right and vertical arrows still operate in a newer one.
+        self.focused_index = self.columns.index(column)
         self._sync_column_selections()
         self._apply_focused_column_style()
         if preview_state:
@@ -1163,13 +1193,15 @@ class _ColumnViewHost:
         self._committed_drag_state = (
             state,
             getattr(getattr(self, "preview_column", None), "file_uri", None),
+            getattr(self, "focused_index", 0),
         )
 
     def _restore_committed_drag_state(self) -> None:
         baseline = getattr(self, "_committed_drag_state", None)
         if not baseline:
             return
-        columns_state, preview_uri = baseline
+        columns_state, preview_uri, *focus_state = baseline
+        focused_index = focus_state[0] if focus_state else getattr(self, "focused_index", 0)
         for column, uris, cursor_uri, anchor_uri in columns_state:
             if column not in self.columns:
                 continue
@@ -1180,6 +1212,8 @@ class _ColumnViewHost:
                     column._selection.select_item(index, False)
             column._cursor_index = column._index_for_uri(cursor_uri) if cursor_uri else None
             column._selection_anchor = column._index_for_uri(anchor_uri) if anchor_uri else None
+        if 0 <= focused_index < len(self.columns):
+            self.focused_index = focused_index
         self._sync_column_selections()
         self._apply_focused_column_style()
         self._set_preview(preview_uri)
@@ -1498,6 +1532,11 @@ class _ColumnViewHost:
             return
 
         if button == Gdk.BUTTON_PRIMARY:
+            # The blue pointer selection is always the arrow-key origin.
+            columns = getattr(self, "columns", [])
+            if column in columns:
+                self.focused_index = columns.index(column)
+                self._apply_focused_column_style()
             index = column._index_for_uri(row.uri)
             modifiers = gesture.get_current_event_state()
             ctrl = bool(modifiers & Gdk.ModifierType.CONTROL_MASK)
@@ -1513,9 +1552,6 @@ class _ColumnViewHost:
                 anchor_item.uri if anchor_item is not None else None,
                 getattr(getattr(self, "preview_column", None), "file_uri", None),
             )
-            if ctrl or shift:
-                self.focused_index = self.columns.index(column)
-                self._apply_focused_column_style()
             if index is not None and (ctrl or shift or not column._selection.is_selected(index)):
                 # Nautilus may leave the first row as the keyboard cursor
                 # without a committed selection. The first Ctrl-click must

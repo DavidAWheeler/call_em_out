@@ -1,21 +1,13 @@
 ```text
-   ____      _ _                        _    ___                  _
-  / ___|__ _| | | ___ _ __ ___    ___ | |_ / _ \ _   _| |_         |
- | |   / _` | | |/ _ \ '_ ` _ \  / _ \| __| | | | | | | __|        |
- | |__| (_| | | |  __/ | | | | ||  __/| |_| |_| | |_| | |_         |
-  \____\__,_|_|_|\___|_| |_| |_| \___|\__|\___/ \__,_|\__|        |
+   _____       _ _       _      ______ __  __      ____  _    _ _______
+  / ____|     | | |     | |    |  ____|  \/  |    / __ \| |  | |_   _|
+ | |     __ _ | | |     | |    | |__  | \  / |   | |  | | |  | | | |
+ | |    / _` || | |     | |    |  __| | |\/| |   | |  | | |  | | | |
+ | |___| (_| || | |____ | |____| |____| |  | |   | |__| | |__| |_| |_|
+  \_____\__,_||_|______||______|______|_|  |_|    \____/ \____/|_____|
 
-                 C A L L _ E M _ O U T
-        Customized Columns for My Computer for Nautilus
-
-                    .-----.       .-----.
-                 .-'  |  | \_____/ |  |  '-.
-                /     |  |    _    |  |     \
-               |      |  |   / \   |  |      |
-               |      |  |  /   \  |  |      |
-               |      |  |_/_____|_|  |      |
-            ___|______|_______________|______|___
-           /_______________________________________\
+                         c a l l _ e m _ o u t
+       A sharper Column View for Nautilus, built on yannmasoch's My Computer for Nautilus
 ```
 
 `call_em_out` is a ramshackle attempt to improve the Column View work started by the person who made the plugin we forked: [My Computer for Nautilus](https://github.com/yannmasoch/nautilus-my-computer). The original author deserves credit for the extension, its Computer view, and the Column View foundation. This is a personal set of usability experiments on top of that work.

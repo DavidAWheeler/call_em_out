@@ -613,14 +613,11 @@ class _ColumnViewHost:
         # Keep one binocular/search pictogram; the linked-button relief and
         # active state communicate the toggle without swapping to an ambiguous
         # arrow or location glyph.
-        self.search_entry.set_visible(enabled)
         location_widget = getattr(self, "_header_location_widget", None)
         location_widgets = getattr(self, "_header_location_widgets", [])
         if enabled:
             location_widgets = self._native_header_surfaces()
             self._header_location_widgets = location_widgets
-        for widget in location_widgets:
-            widget.set_visible(not enabled)
         header = self.search_entry.get_parent()
         adjacent = self.search_entry.get_next_sibling()
         if adjacent is not None:
@@ -672,6 +669,13 @@ class _ColumnViewHost:
 
                     GLib.idle_add(lock_late_allocation)
             location_widget.set_visible(not enabled)
+        # Measure the path surface before changing visibility. Hiding its
+        # stack first causes GTK to hand us the SearchEntry's natural width on
+        # the next allocation pass, which is exactly the shrink seen when
+        # Ctrl+F is toggled.
+        for widget in location_widgets:
+            widget.set_visible(not enabled)
+        self.search_entry.set_visible(enabled)
         if enabled:
             self._search_origin_uri = self._root_uri
             self.search_entry.grab_focus()

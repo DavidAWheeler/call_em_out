@@ -2312,7 +2312,12 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             if isinstance(entry_parent, (Gtk.Box, Gtk.Stack)):
                 entry_parent.remove(search_entry)
             search_entry.set_hexpand(True)
-            search_entry.set_max_width_chars(54)
+            # The entry replaces Nautilus's path surface in this exact header
+            # slot. A character cap makes Search visibly narrower than the
+            # path bar (about 665px versus 844px on a normal window), leaving
+            # an unexplained gap before the view controls. Let the slot's
+            # allocation be the sole width constraint instead.
+            search_entry.set_max_width_chars(-1)
             placement_parent.insert_child_after(search_entry, wrapper)
             host._header_location_widget = location_widget
         else:

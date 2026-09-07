@@ -1,16 +1,24 @@
-# call_em_out
+```text
+   ____      _ _                        _    ___                  _
+  / ___|__ _| | | ___ _ __ ___    ___ | |_ / _ \ _   _| |_         |
+ | |   / _` | | |/ _ \ '_ ` _ \  / _ \| __| | | | | | | __|        |
+ | |__| (_| | | |  __/ | | | | ||  __/| |_| |_| | |_| | |_         |
+  \____\__,_|_|_|\___|_| |_| |_| \___|\__|\___/ \__,_|\__|        |
+
+                 C A L L _ E M _ O U T
+        Customized Columns for My Computer for Nautilus
+
+                    .-----.       .-----.
+                 .-'  |  | \_____/ |  |  '-.
+                /     |  |    _    |  |     \
+               |      |  |   / \   |  |      |
+               |      |  |  /   \  |  |      |
+               |      |  |_/_____|_|  |      |
+            ___|______|_______________|______|___
+           /_______________________________________\
+```
 
 `call_em_out` is a ramshackle attempt to improve the Column View work started by the person who made the plugin we forked: [My Computer for Nautilus](https://github.com/yannmasoch/nautilus-my-computer). The original author deserves credit for the extension, its Computer view, and the Column View foundation. This is a personal set of usability experiments on top of that work.
-
-```text
-       _/\/\_
-     _/ /  \ \_
-    |  |  |  | \
-    |  |  |  |_/
-    |  |  |  |
-  __|__|__|__|__
- /______________\
-```
 
 ## Install
 

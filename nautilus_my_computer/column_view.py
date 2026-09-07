@@ -1183,6 +1183,15 @@ class _ColumnViewHost:
             reveal_uri = getattr(self, "_pending_reveal_uri", None)
             if reveal_uri and column is self.columns[-1]:
                 column.select_child_for_uri(reveal_uri)
+                # Go to Containing Folder should land exactly as ordinary
+                # navigation would: the requested file is selected and its
+                # preview is the rightmost pane, with no empty placeholder.
+                self._set_preview(reveal_uri)
+                self._replace_preview_in_chain()
+                self._sync_column_selections()
+                self._scroll_to_viewport_end()
+                if not self._column_fully_visible(self.columns.index(column)):
+                    self._align_to_viewport_pos(column, 24)
                 column.with_selected_row(lambda row: None)
                 self._pending_reveal_uri = None
             return

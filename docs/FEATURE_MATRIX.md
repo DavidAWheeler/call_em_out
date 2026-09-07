@@ -26,22 +26,28 @@ The fork remains an extension over Nautilus's private widget tree. No Nautilus s
 
 ## Upstream request review
 
-The open upstream requests were reviewed on 2026-09-06. The requests that
-directly match this fork's Column View work are implemented here: keyboard
-navigation ([#91](https://github.com/yannmasoch/nautilus-my-computer/issues/91)),
-multi-selection ([#178](https://github.com/yannmasoch/nautilus-my-computer/issues/178)),
-drag and drop ([#154](https://github.com/yannmasoch/nautilus-my-computer/issues/154)),
-text/config previews ([#155](https://github.com/yannmasoch/nautilus-my-computer/issues/155)),
-default Column View ([#102](https://github.com/yannmasoch/nautilus-my-computer/issues/102)),
-and persistent drive/partition ordering
-([#81](https://github.com/yannmasoch/nautilus-my-computer/issues/81)).
+The open upstream requests were reviewed on 2026-09-06.
 
-The remaining open requests are deliberately outside this pass. Finder tags
-(#157), date grouping (#142), per-folder view profiles and application icons
-(#179), capacity-dependent disk colors (#129), and separate XDG sidebar
-sections (#164) are independent product features rather than gaps in the
-interaction work above. Address completion on `computer:///` (#85) requires a
-private Nautilus method that is not exposed to Python; guessing at that widget
-state would make the startup and Home routing less reliable. Sidebar width
-(#156) and Computer/Network icon sizing (#86) are presentation preferences and
-need a coherent preferences design before adding more one-off settings.
+Implemented or substantially addressed in this fork:
+
+- Keyboard navigation ([#91](https://github.com/yannmasoch/nautilus-my-computer/issues/91)),
+  including column movement and selection.
+- Multi-selection ([#178](https://github.com/yannmasoch/nautilus-my-computer/issues/178)).
+- Drag and drop ([#154](https://github.com/yannmasoch/nautilus-my-computer/issues/154)).
+- Text and configuration previews
+  ([#155](https://github.com/yannmasoch/nautilus-my-computer/issues/155)).
+- Default Column View
+  ([#102](https://github.com/yannmasoch/nautilus-my-computer/issues/102)).
+- Persistent drive and partition ordering
+  ([#81](https://github.com/yannmasoch/nautilus-my-computer/issues/81)).
+
+Deliberately deferred:
+
+- Finder tags (#157), date grouping (#142), per-folder view profiles and
+  application icons (#179), capacity-dependent disk colors (#129), and
+  separate XDG sidebar sections (#164). These are independent product
+  features rather than gaps in the interaction work above.
+- Address completion on `computer:///` (#85), which requires a private
+  Nautilus method that is not exposed to Python. Sidebar width (#156) and
+  Computer/Network icon sizing (#86) are presentation preferences that need a
+  coherent preferences design before adding more one-off settings.

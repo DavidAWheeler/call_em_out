@@ -2,6 +2,10 @@
 
 ## Unreleased (personal fork)
 
+- Routed every Column View file-open path through MIME defaults; the previous
+  duplicate method could accidentally resolve documents through Nautilus's
+  `file://` handler. Launches now carry the click timestamp so an already-open
+  application can take focus.
 - Made the blue selected row the consistent Arrow-key origin after direct
   selection, cancelled drag restoration, and Go to Containing Folder.
 - Kept the header search entry the same width as the path widget when toggled.

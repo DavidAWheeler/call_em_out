@@ -2744,7 +2744,9 @@ def _format_datetime(unix_time: int) -> str:
     return GLib.DateTime.new_from_unix_local(unix_time).format("%x %X")
 
 
-def _open_file_with_default_app(file_uri: str, cancellable: Gio.Cancellable) -> None:
+def _open_file_with_default_app(
+    file_uri: str, cancellable: Gio.Cancellable, *, launch_timestamp: int | None = None
+) -> None:
     """Launch a file through its MIME handler, never its ``file://`` handler.
 
     ``launch_default_for_uri_async`` resolves the URI scheme. Since Nautilus
@@ -2769,7 +2771,19 @@ def _open_file_with_default_app(file_uri: str, cancellable: Gio.Cancellable) -> 
         # GVFS exposes mounted archive members through its FUSE path, which is
         # the local file URL those applications can actually open.
         def _launch(launch_uri: str) -> None:
-            app.launch_uris_async([launch_uri], None, cancellable, _on_launch_mime_app_done)
+            # A launch context carries the current display and a valid launch
+            # timestamp. Without it, an already-running browser may receive
+            # the URI but leave focus on Nautilus, which makes a successful
+            # open look like it failed.
+            display = Gdk.Display.get_default()
+            launch_context = display.get_app_launch_context() if display is not None else None
+            if launch_context is not None:
+                launch_context.set_timestamp(
+                    Gdk.CURRENT_TIME if launch_timestamp is None else launch_timestamp
+                )
+            app.launch_uris_async(
+                [launch_uri], launch_context, cancellable, _on_launch_mime_app_done
+            )
 
         if gfile.get_uri_scheme() != "archive":
             _launch(file_uri)

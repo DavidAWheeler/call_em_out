@@ -44,6 +44,7 @@ from nautilus_my_computer.widgets import (
     MyComputerColumnRow,
     MyComputerPreviewColumn,
     MyComputerToggleButton,
+    _open_file_with_default_app,
 )
 
 VIEW_COLUMN = "column"
@@ -993,12 +994,6 @@ class _ColumnViewHost:
         self._browse_archive(row.uri)
         return True
 
-    def _open_file(self, file_uri: str | None) -> bool:
-        if not file_uri or not self._is_browsable_archive(None, file_uri):
-            return False
-        self._browse_archive(file_uri)
-        return True
-
     def _browse_archive(self, archive_uri: str) -> None:
         """Mount an archive through GVFS, then browse its root in this slot."""
         existing = self._archive_mount_for_uri(archive_uri)
@@ -1659,6 +1654,9 @@ class _ColumnViewHost:
         # the next arrow key is handled by our Miller controller after a mouse
         # click instead of being left with Nautilus's hidden native view.
         column.grab_list_focus()
+        # Preserve the compositor's input timestamp through the asynchronous
+        # MIME lookup so an already-running application can receive focus.
+        self._launch_timestamp = gesture.get_current_event_time()
         column._on_row_activated_internal(row)
         self._arm_focus_retry(self._focused_column())
 
@@ -1881,12 +1879,25 @@ class _ColumnViewHost:
         self._clipboard.set_content(provider)
         self._set_miller_clipboard_state(uris, cut=cut)
 
-    def _open_file(self, uri: str) -> None:
-        """Launch a file with its default application."""
-        try:
-            Gio.AppInfo.launch_default_for_uri(uri, None)
-        except GLib.Error as error:
-            _log(f"Could not open {uri!r}: {error.message}")
+    def _open_file(self, uri: str | None) -> bool:
+        """Open an archive in Column View or a file in its MIME app.
+
+        Keep this as the one file-opening entry point for rows, previews,
+        context menus, and keyboard Return. Resolving a normal ``file://``
+        URI through the URI handler would select Nautilus itself (the right
+        default for directories, but the wrong one for documents).
+        """
+        if not uri:
+            return False
+        if self._is_browsable_archive(None, uri):
+            self._browse_archive(uri)
+        else:
+            launch_timestamp = getattr(self, "_launch_timestamp", None)
+            self._launch_timestamp = None
+            _open_file_with_default_app(
+                uri, Gio.Cancellable(), launch_timestamp=launch_timestamp
+            )
+        return True
 
     def _on_clipboard_changed(self, _clipboard: Gdk.Clipboard) -> None:
         """Drop stale Miller sources when another app replaces the clipboard.

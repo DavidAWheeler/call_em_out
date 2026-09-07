@@ -193,6 +193,15 @@ class ColumnInteractions(unittest.TestCase):
         self.assertEqual(host.focused_index, 1)
         self.assertEqual(self.column.selected_item().uri, "file:///tmp/2")
 
+    def test_regular_file_open_uses_mime_handler_not_file_uri_handler(self):
+        host = _ColumnViewHost.__new__(_ColumnViewHost)
+        host._browse_archive = Mock()
+        with patch("nautilus_my_computer.column_view._open_file_with_default_app") as opener:
+            self.assertTrue(host._open_file("file:///tmp/report.html"))
+        host._browse_archive.assert_not_called()
+        opener.assert_called_once()
+        self.assertEqual(opener.call_args.args[0], "file:///tmp/report.html")
+
     def test_path_sync_clears_failed_drag_highlight(self):
         host = _ColumnViewHost.__new__(_ColumnViewHost)
         child = MyComputerColumn.__new__(MyComputerColumn)

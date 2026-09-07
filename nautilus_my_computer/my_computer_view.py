@@ -709,7 +709,9 @@ button.mc-trash-restore.suggested-action:hover {
     min-height: 0;
     padding: 0;
 }
-.mc-history-search-group button:hover {
+.mc-history-search-group button:hover,
+.mc-history-search-group button.flat:hover,
+.mc-history-search-history button:hover {
     background-color: alpha(@window_fg_color, 0.07);
 }
 .mc-history-search-group button:checked,
@@ -727,8 +729,7 @@ button.mc-trash-restore.suggested-action:hover {
     margin: 0;
 }
 .mc-history-search-button {
-    border-left: 1px solid alpha(@window_fg_color, 0.18);
-    border-radius: 0 7px 7px 0;
+    border-radius: 7px;
 }
 """
 

@@ -2257,9 +2257,18 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
                 wrapper = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=1)
                 wrapper.add_css_class("mc-history-search-group")
                 wrapper.set_valign(Gtk.Align.FILL)
+                separator = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+                # Use the same real, inset separator as Grid/List/Columns.
+                # A CSS border follows the button's rounded edge and reads as
+                # a short notch rather than a divider.
+                separator.add_css_class("mc-toggle-sep")
+                separator.set_margin_top(6)
+                separator.set_margin_bottom(6)
                 wrapper.append(history)
+                wrapper.append(separator)
                 wrapper.append(search)
                 history._mc_history_search_wrapper = wrapper
+                history._mc_history_search_separator = separator
                 placement_parent.insert_child_after(wrapper, before)
             elif search.get_parent() is not wrapper:
                 old_parent.remove(search)

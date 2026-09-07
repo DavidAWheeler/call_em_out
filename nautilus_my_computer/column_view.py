@@ -565,7 +565,7 @@ class _ColumnViewHost:
         search_bar.set_visible(False)
         self._search_control_holder = search_bar
         self.search_toggle = Gtk.ToggleButton()
-        search_icon = _bundled_gicon("search-folder-symbolic")
+        search_icon = _bundled_gicon("search-folder-binoculars-symbolic")
         if search_icon is not None:
             self.search_toggle.set_child(Gtk.Image.new_from_gicon(search_icon))
         else:
@@ -595,6 +595,10 @@ class _ColumnViewHost:
 
     def _on_search_toggled(self, button) -> None:
         enabled = button.get_active()
+        icon_name = "location-symbolic" if enabled else "search-folder-binoculars-symbolic"
+        icon = _bundled_gicon(icon_name)
+        if icon is not None:
+            button.set_child(Gtk.Image.new_from_gicon(icon))
         self.search_entry.set_visible(enabled)
         location_widget = getattr(self, "_header_location_widget", None)
         location_widgets = getattr(self, "_header_location_widgets", [])
@@ -2850,6 +2854,13 @@ class _ColumnViewHost:
                 column.destroy_enumeration()
         self.columns = [*ancestor_columns, destination]
         self.search_result_column = None
+        # The jump is now an ordinary filesystem location. Rebuild the
+        # preview without Search/Recent affordances (especially the
+        # containing-folder button) so the destination feels like a normal
+        # folder browse rather than a result-provider view.
+        selected_uri = getattr(self.preview_column, "file_uri", None)
+        if selected_uri:
+            self._set_preview(selected_uri)
         self._retained_navigation = True
         self._history_index = len(self.columns) - 1
         self.focused_index = self._history_index

@@ -43,6 +43,8 @@ Open Files again. The installer puts the extension in your user data directory; 
   utility width instead of expanding to fill the window.
 - Sidebar bookmarks always become the first Column View column, including a
   repeated click on the current location.
+- Empty space in the sidebar can be dragged to move the Nautilus window;
+  sidebar rows keep their normal click, reorder, and file-drag behavior.
 
 ### Open and preview
 

@@ -817,6 +817,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             "native_hide_pending": False,  # coalesces re-hide bursts into one idle pass
             "main_menu_action_group": None,
             "main_menu_watch_attached": False,
+            "sidebar_window_drag_attached": False,
         }
 
         # Capture-phase key guard on the window: Nautilus's "type to search"
@@ -3176,6 +3177,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             return False
 
         _log(f"_inject_sidebar_link: content={type(nautilus_sidebar).__name__}")
+        self._attach_sidebar_window_drag(win, nautilus_sidebar)
 
         native_listbox = self._find_sidebar_listbox(nautilus_sidebar)
         if native_listbox is None:
@@ -3198,6 +3200,66 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         return self._inject_separate_computer_row(
             win, nautilus_sidebar, native_scrolled_window, native_listbox
         )
+
+    @staticmethod
+    def _sidebar_drag_starts_in_empty_space(root: Gtk.Widget, x: float, y: float) -> bool:
+        """Return whether a sidebar drag began outside an interactive row.
+
+        Sidebar rows own their click, reorder, and file-drag gestures. Walking
+        the picked widget's ancestors lets the parent surface offer window
+        dragging only for genuinely empty space, without stealing a row's
+        normal behavior or a scrollbar drag.
+        """
+        hit = root.pick(x, y, Gtk.PickFlags.DEFAULT)
+        while hit is not None and hit is not root:
+            if isinstance(hit, (Gtk.ListBoxRow, Gtk.Button, Gtk.Scrollbar, Gtk.Scale)):
+                return False
+            if "SidebarRow" in type(hit).__name__:
+                return False
+            hit = hit.get_parent()
+        return hit is root
+
+    def _attach_sidebar_window_drag(self, win: Gtk.Window, sidebar: Gtk.Widget) -> None:
+        """Allow primary-dragging unused sidebar space to move the window."""
+        state = self._windows.get(win)
+        if state is None or state.get("sidebar_window_drag_attached"):
+            return
+
+        gesture = Gtk.GestureDrag()
+        gesture.set_button(Gdk.BUTTON_PRIMARY)
+
+        def _on_drag_begin(drag, _start_x, _start_y):
+            ok, x, y = drag.get_start_point()
+            if not ok or not self._sidebar_drag_starts_in_empty_space(sidebar, x, y):
+                drag.set_state(Gtk.EventSequenceState.DENIED)
+                return
+            native = sidebar.get_native()
+            device = drag.get_current_event_device()
+            if native is None or device is None:
+                drag.set_state(Gtk.EventSequenceState.DENIED)
+                return
+            surface = native.get_surface()
+            begin_move = getattr(surface, "begin_move", None)
+            if not callable(begin_move):
+                drag.set_state(Gtk.EventSequenceState.DENIED)
+                return
+            translated = sidebar.translate_coordinates(native, x, y)
+            if translated is None:
+                drag.set_state(Gtk.EventSequenceState.DENIED)
+                return
+            begin_move(
+                device,
+                Gdk.BUTTON_PRIMARY,
+                translated[0],
+                translated[1],
+                drag.get_current_event_time(),
+            )
+            drag.set_state(Gtk.EventSequenceState.CLAIMED)
+
+        gesture.connect("drag-begin", _on_drag_begin)
+        sidebar.add_controller(gesture)
+        state["sidebar_window_drag_attached"] = True
+        _log("sidebar empty-space window drag attached")
 
     def _fix_pathbar_icon(self, win: Gtk.Window) -> bool:
         """Non-invasive chip icon update. Called on each title-change arrival at

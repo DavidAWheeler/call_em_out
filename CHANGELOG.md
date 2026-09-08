@@ -2,6 +2,8 @@
 
 ## Unreleased (personal fork)
 
+- Delayed hidden-column reveal until click release so starting a file drag no
+  longer slides the source column over the intended drop target.
 - Allow dragging unused sidebar space to move the window while leaving sidebar
   rows and scrollbar gestures untouched.
 - Kept the trailing preview at its default utility width, revealed a folder

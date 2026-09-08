@@ -1546,14 +1546,6 @@ class _ColumnViewHost:
             if column in columns:
                 self.focused_index = columns.index(column)
                 self._apply_focused_column_style()
-                # A row can be clicked in the narrow portion of a column
-                # peeking out from beneath the sidebar. Selection alone is
-                # not enough: reveal the owning column immediately so the
-                # blue row and its neighbours are readable before any later
-                # preview or arrow-key action runs.
-                visible_check = getattr(self, "_column_fully_visible", None)
-                if callable(visible_check) and not visible_check(self.focused_index):
-                    self._align_to_viewport_pos(column, 24)
             index = column._index_for_uri(row.uri)
             modifiers = gesture.get_current_event_state()
             ctrl = bool(modifiers & Gdk.ModifierType.CONTROL_MASK)
@@ -1662,6 +1654,16 @@ class _ColumnViewHost:
             # into the next press (see _on_row_pressed's DENIED branch).
             gesture.set_state(Gtk.EventSequenceState.DENIED)
             return
+        # Reveal only after the press has remained a click. A DragSource also
+        # starts from the row's press, and scrolling here would move the
+        # source column over the user's intended drop target before DnD gets
+        # underway. Release is the first point at which we know it was not a
+        # drag, so normal clicks still bring a partly hidden column into view.
+        visible_check = getattr(self, "_column_fully_visible", None)
+        if column in getattr(self, "columns", []) and callable(visible_check):
+            column_index = self.columns.index(column)
+            if not visible_check(column_index):
+                self._align_to_viewport_pos(column, 24)
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         modifiers = gesture.get_current_event_state()
         if getattr(row, "_mc_pointer_selection_only", False) or modifiers & (

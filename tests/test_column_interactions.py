@@ -221,7 +221,7 @@ class ColumnInteractions(unittest.TestCase):
         self.assertEqual(host.focused_index, 1)
         self.assertEqual(self.column.selected_item().uri, "file:///tmp/2")
 
-    def test_clicking_hidden_column_requests_reveal(self):
+    def test_pressing_hidden_column_does_not_scroll_before_dnd(self):
         other = object()
         host = SimpleNamespace(
             _cancel_row_commit=Mock(),
@@ -237,6 +237,23 @@ class ColumnInteractions(unittest.TestCase):
         _ColumnViewHost._on_row_pressed(
             host, gesture, 1, 1, 1, self.column, SimpleNamespace(uri="file:///tmp/2")
         )
+        host._align_to_viewport_pos.assert_not_called()
+
+    def test_completed_click_reveals_hidden_column(self):
+        host = SimpleNamespace(
+            columns=[self.column],
+            _column_fully_visible=Mock(return_value=False),
+            _align_to_viewport_pos=Mock(),
+        )
+        row = SimpleNamespace(
+            _mc_pointer_selection_only=True,
+            get_width=Mock(return_value=100),
+            get_height=Mock(return_value=24),
+        )
+        gesture = Mock()
+        gesture.get_current_button.return_value = Gdk.BUTTON_PRIMARY
+        gesture.get_current_event_state.return_value = Gdk.ModifierType(0)
+        _ColumnViewHost._on_row_released(host, gesture, 1, 1, 1, self.column, row)
         host._align_to_viewport_pos.assert_called_once_with(self.column, 24)
 
     def test_regular_file_open_uses_mime_handler_not_file_uri_handler(self):

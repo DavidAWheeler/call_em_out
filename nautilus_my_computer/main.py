@@ -3177,7 +3177,11 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             return False
 
         _log(f"_inject_sidebar_link: content={type(nautilus_sidebar).__name__}")
-        self._attach_sidebar_window_drag(win, nautilus_sidebar)
+        # Install on the toolbar surface in capture phase. Native sidebar
+        # rows have their own gesture controllers and otherwise claim the
+        # sequence before an ancestor can recognize a drag that began in the
+        # unused area beside/below the list.
+        self._attach_sidebar_window_drag(win, sidebar_toolbar)
 
         native_listbox = self._find_sidebar_listbox(nautilus_sidebar)
         if native_listbox is None:
@@ -3227,6 +3231,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
 
         gesture = Gtk.GestureDrag()
         gesture.set_button(Gdk.BUTTON_PRIMARY)
+        gesture.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
 
         def _on_drag_begin(drag, _start_x, _start_y):
             ok, x, y = drag.get_start_point()

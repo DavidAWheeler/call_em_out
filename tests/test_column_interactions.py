@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from nautilus_my_computer.column_view import _ColumnViewHost
+from nautilus_my_computer.main import MyComputerExtension
 from nautilus_my_computer.widgets import (
     Gdk,
     Gio,
@@ -53,6 +54,20 @@ class ColumnInteractions(unittest.TestCase):
         self.assertNotIn("bad", rendered)
         self.assertEqual(
             MyComputerPreviewColumn._is_html_preview_type("text/html", "index.html"), True
+        )
+
+    def test_main_menu_new_folder_anchor_follows_new_tab(self):
+        menu = Gio.Menu()
+        section = Gio.Menu()
+        section.append("New Window", "win.new-window")
+        section.append("New Tab", "win.new-tab")
+        menu.append_section(None, section)
+        container, index = MyComputerExtension._find_menu_anchor(menu)
+        container.insert_item(index + 1, Gio.MenuItem.new("New Folder", "mcmain.new-folder"))
+        self.assertEqual(
+            [container.get_item_attribute_value(i, "label", None).get_string()
+             for i in range(container.get_n_items())],
+            ["New Window", "New Tab", "New Folder"],
         )
 
     def test_control_drop_requests_copy_for_combined_offer(self):
@@ -221,14 +236,25 @@ class ColumnInteractions(unittest.TestCase):
             )
         schedule.assert_not_called()
 
+    def test_directory_monitor_refreshes_active_preview_metadata_only(self):
+        host = MyComputerColumn.__new__(MyComputerColumn)
+        host._content_refresh_id = 0
+        preview = Mock(file_uri="file:///tmp/report.txt")
+        host._mc_host = SimpleNamespace(preview_column=preview)
+        changed = Gio.File.new_for_uri("file:///tmp/report.txt")
+        with patch("nautilus_my_computer.widgets.GLib.idle_add") as schedule:
+            host._on_content_changed(None, changed, None, Gio.FileMonitorEvent.CHANGED)
+        schedule.assert_not_called()
+        preview.refresh_metadata.assert_called_once_with()
+
     def test_directory_monitor_refreshes_on_membership_events(self):
         host = MyComputerColumn.__new__(MyComputerColumn)
         host._content_refresh_id = 0
-        with patch("nautilus_my_computer.widgets.GLib.idle_add", return_value=42) as schedule:
+        with patch("nautilus_my_computer.widgets.GLib.timeout_add", return_value=42) as schedule:
             host._on_content_changed(
                 None, None, None, Gio.FileMonitorEvent.CREATED
             )
-        schedule.assert_called_once_with(host._reload_after_content_change)
+        schedule.assert_called_once_with(120, host._reload_after_content_change)
         self.assertEqual(host._content_refresh_id, 42)
 
     def test_path_sync_clears_failed_drag_highlight(self):

@@ -61,7 +61,9 @@ Open Files again. The installer puts the extension in your user data directory; 
 - Multi-file drag and drop: local and mounted-NAS moves by default, genuinely
   remote transfers copy, Ctrl copies, and Shift moves.
 - Direct folder-row drops plus hover navigation into deeper folders.
-- Faster live refresh after file operations and external changes.
+- The hamburger menu keeps **New Folder** available when a full column has no
+  empty background area. Downloads update the active preview's size and dates
+  in place while real filename changes refresh the listing without blanking it.
 - A real Trash Column View with metadata, Restore, Delete Permanently, and
   destination-aware drag-out.
 

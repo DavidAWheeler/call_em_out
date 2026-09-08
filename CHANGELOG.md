@@ -3,8 +3,10 @@
 ## Unreleased (personal fork)
 
 - Made blank space in a Column View accept file drops by capturing the drop
-  at the column surface, and stopped reloading on metadata-only monitor events
-  that made active Downloads blink during Chrome transfers.
+  at the column surface. Added New Folder to the hamburger menu for columns
+  with no available blank space, and stopped active Downloads from blanking and
+  rebuilding: size/timestamp writes update the selected preview in place while
+  real creates, deletes, and renames still refresh the listing.
 - Routed every Column View file-open path through MIME defaults; the previous
   duplicate method could accidentally resolve documents through Nautilus's
   `file://` handler. Launches now carry the click timestamp so an already-open

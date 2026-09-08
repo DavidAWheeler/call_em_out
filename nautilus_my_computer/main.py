@@ -815,6 +815,8 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
             "native_hide_model": None,  # observe_children() model of native listbox
             "native_hide_handler": None,  # items-changed handler id on that model
             "native_hide_pending": False,  # coalesces re-hide bursts into one idle pass
+            "main_menu_action_group": None,
+            "main_menu_watch_attached": False,
         }
 
         # Capture-phase key guard on the window: Nautilus's "type to search"
@@ -834,6 +836,7 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         GLib.idle_add(self._remove_redundant_header_search, win)
         GLib.idle_add(self._move_search_toggle_left, win)
         GLib.idle_add(self._move_main_menu_right, win)
+        GLib.idle_add(self._attach_main_menu_watch, win)
         if _is_file_chooser_window(win):
             # No window-level "locations-changed" on this class — watch the
             # slot's own "location" property directly (same ground truth
@@ -955,6 +958,12 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         state = self._windows.pop(win, None)
         if state:
             column_view.detach_column_view_entry(self, win, state)
+            if state.get("main_menu_action_group") is not None:
+                try:
+                    win.insert_action_group("mcmain", None)
+                except Exception:
+                    pass
+                state["main_menu_action_group"] = None
             model = state.get("native_hide_model")
             handler = state.get("native_hide_handler")
             if model is not None and handler:
@@ -2369,6 +2378,139 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         else:
             _log(f"main menu parent unsupported: {type(old_parent).__name__}")
         return GLib.SOURCE_REMOVE
+
+    def _attach_main_menu_watch(self, win: Gtk.Window) -> bool:
+        """Add our focused-column action to Nautilus's hamburger menu.
+
+        The native menu model is created lazily, so the action is installed on
+        the window immediately and the menu item is inserted each time the
+        popover opens. This keeps the item below Nautilus's New Window/New Tab
+        entries even when Nautilus rebuilds the model after a navigation.
+        """
+        state = self._windows.get(win)
+        if state is None:
+            return GLib.SOURCE_REMOVE
+        if state.get("main_menu_action_group") is None:
+            action = Gio.SimpleAction.new("new-folder", None)
+            action.connect(
+                "activate",
+                lambda _action, _parameter, win=win: self._new_folder_in_column_focused_folder(win),
+            )
+            group = Gio.SimpleActionGroup()
+            group.add_action(action)
+            win.insert_action_group("mcmain", group)
+            state["main_menu_action_group"] = group
+
+        menu = next(
+            (
+                widget
+                for widget in _all_widgets(win)
+                if isinstance(widget, Gtk.MenuButton)
+                and widget.get_icon_name() == "open-menu-symbolic"
+                and widget.get_mapped()
+            ),
+            None,
+        )
+        if menu is None:
+            GLib.timeout_add(100, self._attach_main_menu_watch, win)
+            return GLib.SOURCE_REMOVE
+        if not state.get("main_menu_watch_attached"):
+            menu.connect(
+                "notify::active",
+                lambda _button, _pspec, win=win: GLib.idle_add(
+                    self._inject_main_menu_new_folder, win
+                ),
+            )
+            state["main_menu_watch_attached"] = True
+        GLib.idle_add(self._inject_main_menu_new_folder, win)
+        return GLib.SOURCE_REMOVE
+
+    @staticmethod
+    def _find_menu_anchor(model: Gio.Menu):
+        """Return (menu, index) for the New Tab/New Window item in a menu tree."""
+        action_type = GLib.VariantType.new("s")
+
+        def scan(container):
+            found_anchor = None
+            for index in range(container.get_n_items()):
+                action = container.get_item_attribute_value(index, "action", action_type)
+                if action is not None:
+                    name = action.get_string()
+                    if name.endswith(".new-tab") or name.endswith(".new-window"):
+                        found_anchor = (container, index)
+                for link in (Gio.MENU_LINK_SUBMENU, Gio.MENU_LINK_SECTION):
+                    child = container.get_item_link(index, link)
+                    if child is not None:
+                        found = scan(child)
+                        if found is not None:
+                            found_anchor = found
+            return found_anchor
+
+        return scan(model)
+
+    def _inject_main_menu_new_folder(self, win: Gtk.Window) -> bool:
+        state = self._windows.get(win)
+        if state is None:
+            return GLib.SOURCE_REMOVE
+        action_group = state.get("main_menu_action_group")
+        if action_group is None:
+            return GLib.SOURCE_REMOVE
+        action = action_group.lookup_action("new-folder")
+        if action is not None:
+            action.set_enabled(self._active_slot_showing_column(win))
+
+        menu_button = next(
+            (
+                widget
+                for widget in _all_widgets(win)
+                if isinstance(widget, Gtk.MenuButton)
+                and widget.get_icon_name() == "open-menu-symbolic"
+            ),
+            None,
+        )
+        popover = menu_button.get_popover() if menu_button is not None else None
+        model = popover.get_menu_model() if isinstance(popover, Gtk.PopoverMenu) else None
+        if not isinstance(model, Gio.Menu):
+            return GLib.SOURCE_REMOVE
+
+        # Idempotent across popover/model rebuilds. Remove a prior item before
+        # reinserting so an unchanged native model never accumulates duplicates.
+        for container in self._iter_menu_containers(model):
+            for index in range(container.get_n_items() - 1, -1, -1):
+                value = container.get_item_attribute_value(index, "action", GLib.VariantType.new("s"))
+                if value is not None and value.get_string() == "mcmain.new-folder":
+                    container.remove(index)
+
+        anchor = self._find_menu_anchor(model)
+        item = Gio.MenuItem.new(_native("New Folder"), "mcmain.new-folder")
+        item.set_attribute_value("accel", GLib.Variant.new_string("<Control><Shift>N"))
+        if anchor is None:
+            model.append_item(item)
+        else:
+            container, index = anchor
+            container.insert_item(index + 1, item)
+        popover.insert_action_group("mcmain", action_group)
+        _log("main menu: New Folder inserted below New Window/New Tab")
+        return GLib.SOURCE_REMOVE
+
+    @staticmethod
+    def _iter_menu_containers(model: Gio.Menu):
+        """Yield every mutable Gio.Menu in a menu tree, including sections."""
+        seen = set()
+
+        def walk(container):
+            marker = id(container)
+            if marker in seen:
+                return
+            seen.add(marker)
+            yield container
+            for index in range(container.get_n_items()):
+                for link in (Gio.MENU_LINK_SUBMENU, Gio.MENU_LINK_SECTION):
+                    child = container.get_item_link(index, link)
+                    if child is not None:
+                        yield from walk(child)
+
+        yield from walk(model)
 
     def _navigate_current_in_place(self, uri: str, win: Gtk.Window) -> bool:
         """Navigate the window's current tab to uri. Never opens a window or a

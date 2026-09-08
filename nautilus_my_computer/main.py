@@ -3229,39 +3229,35 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         if state is None or state.get("sidebar_window_drag_attached"):
             return
 
-        gesture = Gtk.GestureDrag()
+        gesture = Gtk.GestureClick()
         gesture.set_button(Gdk.BUTTON_PRIMARY)
         gesture.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
 
-        def _on_drag_begin(drag, _start_x, _start_y):
-            ok, x, y = drag.get_start_point()
-            if not ok or not self._sidebar_drag_starts_in_empty_space(sidebar, x, y):
-                drag.set_state(Gtk.EventSequenceState.DENIED)
+        def _on_press(click, _n_press, x, y):
+            if not self._sidebar_drag_starts_in_empty_space(sidebar, x, y):
+                click.set_state(Gtk.EventSequenceState.DENIED)
                 return
             native = sidebar.get_native()
-            device = drag.get_current_event_device()
+            device = click.get_current_event_device()
             if native is None or device is None:
-                drag.set_state(Gtk.EventSequenceState.DENIED)
+                click.set_state(Gtk.EventSequenceState.DENIED)
                 return
             surface = native.get_surface()
             begin_move = getattr(surface, "begin_move", None)
-            if not callable(begin_move):
-                drag.set_state(Gtk.EventSequenceState.DENIED)
-                return
             translated = sidebar.translate_coordinates(native, x, y)
-            if translated is None:
-                drag.set_state(Gtk.EventSequenceState.DENIED)
+            if not callable(begin_move) or translated is None:
+                click.set_state(Gtk.EventSequenceState.DENIED)
                 return
             begin_move(
                 device,
                 Gdk.BUTTON_PRIMARY,
                 translated[0],
                 translated[1],
-                drag.get_current_event_time(),
+                click.get_current_event_time(),
             )
-            drag.set_state(Gtk.EventSequenceState.CLAIMED)
+            click.set_state(Gtk.EventSequenceState.CLAIMED)
 
-        gesture.connect("drag-begin", _on_drag_begin)
+        gesture.connect("pressed", _on_press)
         sidebar.add_controller(gesture)
         state["sidebar_window_drag_attached"] = True
         _log("sidebar empty-space window drag attached")

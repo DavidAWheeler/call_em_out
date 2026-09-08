@@ -2473,12 +2473,20 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         if not isinstance(model, Gio.Menu):
             return GLib.SOURCE_REMOVE
 
-        # Idempotent across popover/model rebuilds. Remove a prior item before
-        # reinserting so an unchanged native model never accumulates duplicates.
+        # Idempotent across popover/model rebuilds. Remove prior extension
+        # items before reinserting so an unchanged native model never
+        # accumulates duplicates.
         for container in self._iter_menu_containers(model):
             for index in range(container.get_n_items() - 1, -1, -1):
-                value = container.get_item_attribute_value(index, "action", GLib.VariantType.new("s"))
-                if value is not None and value.get_string() == "mcmain.new-folder":
+                action_value = container.get_item_attribute_value(
+                    index, "action", GLib.VariantType.new("s")
+                )
+                owned_view = container.get_item_attribute_value(
+                    index, "mc-owned-view", GLib.VariantType.new("b")
+                )
+                if (action_value is not None and action_value.get_string() == "mcmain.new-folder") or (
+                    owned_view is not None and owned_view.get_boolean()
+                ):
                     container.remove(index)
 
         anchor = self._find_menu_anchor(model)
@@ -2486,12 +2494,52 @@ class MyComputerExtension(GObject.GObject, Nautilus.MenuProvider):
         item.set_attribute_value("accel", GLib.Variant.new_string("<Control><Shift>N"))
         if anchor is None:
             model.append_item(item)
+            container, index = model, model.get_n_items() - 1
         else:
             container, index = anchor
             container.insert_item(index + 1, item)
+            index += 1
+        # Keep the context-aware View Options actions available from the
+        # hamburger as a keyboard/menu route. The toolbar button remains for
+        # quick access, while this copy omits Nautilus's one custom icon-size
+        # child because a custom widget cannot be shared by two popovers.
+        view_model = state.get("active_view_options_model")
+        if isinstance(view_model, Gio.MenuModel):
+            view_menu = self._clone_menu_without_custom_items(view_model)
+            if view_menu.get_n_items() > 0:
+                view_item = Gio.MenuItem.new_submenu(_native("View"), view_menu)
+                view_item.set_attribute_value("mc-owned-view", GLib.Variant.new_boolean(True))
+                container.insert_item(index + 1, view_item)
         popover.insert_action_group("mcmain", action_group)
+        sort_group = state.get("column_sort_action_group")
+        if sort_group is not None:
+            popover.insert_action_group("mc-column", sort_group)
         _log("main menu: New Folder inserted below New Window/New Tab")
         return GLib.SOURCE_REMOVE
+
+    @staticmethod
+    def _clone_menu_without_custom_items(model: Gio.MenuModel) -> Gio.Menu:
+        """Copy a View Options model for the hamburger menu.
+
+        The native model includes a GTK custom child for icon-size controls.
+        Omit that one row while preserving normal actions, targets, sections,
+        and submenus in the shared application menu.
+        """
+        out = Gio.Menu()
+        custom_type = GLib.VariantType.new("s")
+        for index in range(model.get_n_items()):
+            custom = model.get_item_attribute_value(index, "custom", custom_type)
+            if custom is not None:
+                continue
+            item = Gio.MenuItem.new_from_model(model, index)
+            submenu = model.get_item_link(index, Gio.MENU_LINK_SUBMENU)
+            section = model.get_item_link(index, Gio.MENU_LINK_SECTION)
+            if submenu is not None:
+                item.set_submenu(MyComputerExtension._clone_menu_without_custom_items(submenu))
+            elif section is not None:
+                item.set_section(MyComputerExtension._clone_menu_without_custom_items(section))
+            out.append_item(item)
+        return out
 
     @staticmethod
     def _iter_menu_containers(model: Gio.Menu):

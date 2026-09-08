@@ -38,8 +38,9 @@ Open Files again. The installer puts the extension in your user data directory; 
 - Arrow keys begin from the blue selection: the last clicked row, keyboard
   move, restored cancelled-drag selection, or containing-folder destination.
 - Sliding Back navigation, including Back inside Search, keeps the next
-  column peeking on deck. Bookmark jumps reset stale scroll, and resizing
-  reveals hidden columns before stretching the preview.
+  column peeking on deck. Bookmark jumps reset stale scroll, and selecting a
+  partly hidden row brings its column into view. The preview keeps a readable
+  utility width instead of expanding to fill the window.
 - Sidebar bookmarks always become the first Column View column, including a
   repeated click on the current location.
 
@@ -64,6 +65,9 @@ Open Files again. The installer puts the extension in your user data directory; 
 - The hamburger menu keeps **New Folder** available when a full column has no
   empty background area. Downloads update the active preview's size and dates
   in place while real filename changes refresh the listing without blanking it.
+- The hamburger also exposes the active View Options actions in a submenu;
+  the pathbar's three-dot button remains the current-folder action menu for
+  folder-specific operations such as bookmarks and properties.
 - A real Trash Column View with metadata, Restore, Delete Permanently, and
   destination-aware drag-out.
 

@@ -168,7 +168,6 @@ _NATIVE_TOGGLE_ACTION = "slot.files-view-mode-toggle"
 # keep the layout arithmetic below legible.
 COLUMN_WIDTH = _COLUMN_WIDTH
 PREVIEW_WIDTH = _COLUMN_PREVIEW_WIDTH
-PREVIEW_MAX_WIDTH = 560
 HANDLE_WIDTH_ESTIMATE = 12
 # Generous hit margin (in px, either side of a paned's current position)
 # used to tell a genuine press-and-drag on the handle apart from GTK
@@ -1547,6 +1546,14 @@ class _ColumnViewHost:
             if column in columns:
                 self.focused_index = columns.index(column)
                 self._apply_focused_column_style()
+                # A row can be clicked in the narrow portion of a column
+                # peeking out from beneath the sidebar. Selection alone is
+                # not enough: reveal the owning column immediately so the
+                # blue row and its neighbours are readable before any later
+                # preview or arrow-key action runs.
+                visible_check = getattr(self, "_column_fully_visible", None)
+                if callable(visible_check) and not visible_check(self.focused_index):
+                    self._align_to_viewport_pos(column, 24)
             index = column._index_for_uri(row.uri)
             modifiers = gesture.get_current_event_state()
             ctrl = bool(modifiers & Gdk.ModifierType.CONTROL_MASK)
@@ -3286,29 +3293,18 @@ class _ColumnViewHost:
         viewport_width = self.scroller.get_width()
         viewport_height = self.scroller.get_height()
         visible_right_edge = viewport_width + adj.get_value()
-        # The preview absorbs all slack: when the fixed folder columns don't
-        # fill the viewport it stretches to the right edge (hexpand=True,
-        # halign=FILL on the preview widget itself); once they overflow it
-        # sits at its own PREVIEW_WIDTH floor and the scroller scrolls.
+        # Keep the preview at its default utility-pane width. The preview
+        # widget is start-aligned, so a short chain leaves deliberate empty
+        # space rather than making the preview look like a second file view.
+        # When the chain is wider than the viewport, the scroller handles the
+        # horizontal movement and the same width remains predictable.
         fixed_width = self._col_position(len(self.columns))
         transition_preview = getattr(self, "_transition_preview", None)
         if transition_preview is not None:
             fixed_width += transition_preview.width + HANDLE_WIDTH_ESTIMATE
         preview_default_width = PREVIEW_WIDTH
 
-        if viewport_width <= 0:
-            preview_width = preview_default_width
-        elif adj.get_value() > 0:
-            # Once the chain has scrolled left to reveal an ancestor, do not
-            # let the preview absorb viewport slack. Keeping its normal width
-            # prevents its title/content from extending beyond the window and
-            # leaves the selected source column readable beside it.
-            preview_width = preview_default_width
-        else:
-            available_for_preview = viewport_width - fixed_width
-            preview_width = min(
-                PREVIEW_MAX_WIDTH, max(preview_default_width, available_for_preview)
-            )
+        preview_width = preview_default_width
 
         total_width = fixed_width + preview_width
         canvas_width = max(total_width, viewport_width, visible_right_edge)

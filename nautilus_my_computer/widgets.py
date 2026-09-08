@@ -2981,13 +2981,14 @@ class MyComputerPreviewColumn(Gtk.Box):
         self.set_size_request(_COLUMN_PREVIEW_WIDTH, -1)
         self.set_vexpand(True)
         self.set_valign(Gtk.Align.FILL)
-        # The preview column is always the rightmost element, so it always
-        # absorbs slack Finder-style: when the folder columns don't fill the
-        # viewport it stretches to the right edge; once they overflow it sits
-        # at its own _COLUMN_PREVIEW_WIDTH floor and the scroller scrolls. Its
-        # size_request is the floor, hexpand/halign the slack.
-        self.set_hexpand(True)
-        self.set_halign(Gtk.Align.FILL)
+        # The preview column is always the rightmost element. Keep it at the
+        # normal preview width instead of allowing Gtk.Paned to stretch it
+        # across every unused pixel when the selected item is in the base
+        # column. A fixed utility pane is easier to scan and leaves the
+        # column tree visibly intact; the Miller scroller still brings it
+        # into view when the chain is wider than the window.
+        self.set_hexpand(False)
+        self.set_halign(Gtk.Align.START)
         self.set_overflow(Gtk.Overflow.HIDDEN)
         self.add_css_class("mc-column")
         # CSS target for the preview column (12px inner padding lives here).

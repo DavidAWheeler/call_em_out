@@ -2,6 +2,10 @@
 
 ## Unreleased (personal fork)
 
+- Kept the trailing preview at its default utility width, revealed a folder
+  column when a partly hidden row is clicked, and added the active View Options
+  actions to the hamburger as a submenu. The pathbar three-dot control remains
+  the current-folder action menu.
 - Made blank space in a Column View accept file drops by capturing the drop
   at the column surface. Added New Folder to the hamburger menu for columns
   with no available blank space, and stopped active Downloads from blanking and

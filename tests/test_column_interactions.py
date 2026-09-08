@@ -70,6 +70,19 @@ class ColumnInteractions(unittest.TestCase):
             ["New Window", "New Tab", "New Folder"],
         )
 
+    def test_hamburger_view_copy_preserves_actions_and_nested_sections(self):
+        menu = Gio.Menu()
+        section = Gio.Menu()
+        section.append("Sort", "mc-column.sort")
+        submenu = Gio.Menu()
+        submenu.append("By Name", "mc-column.sort")
+        section.append_submenu("Sort by", submenu)
+        menu.append_section(None, section)
+        clone = MyComputerExtension._clone_menu_without_custom_items(menu)
+        cloned_section = clone.get_item_link(0, Gio.MENU_LINK_SECTION)
+        self.assertEqual(cloned_section.get_n_items(), 2)
+        self.assertIsNotNone(cloned_section.get_item_link(1, Gio.MENU_LINK_SUBMENU))
+
     def test_control_drop_requests_copy_for_combined_offer(self):
         device = Mock()
         device.get_modifier_state.return_value = Gdk.ModifierType.CONTROL_MASK
@@ -207,6 +220,24 @@ class ColumnInteractions(unittest.TestCase):
         )
         self.assertEqual(host.focused_index, 1)
         self.assertEqual(self.column.selected_item().uri, "file:///tmp/2")
+
+    def test_clicking_hidden_column_requests_reveal(self):
+        other = object()
+        host = SimpleNamespace(
+            _cancel_row_commit=Mock(),
+            columns=[other, self.column],
+            focused_index=0,
+            _apply_focused_column_style=Mock(),
+            _column_fully_visible=Mock(return_value=False),
+            _align_to_viewport_pos=Mock(),
+        )
+        gesture = Mock()
+        gesture.get_current_button.return_value = Gdk.BUTTON_PRIMARY
+        gesture.get_current_event_state.return_value = Gdk.ModifierType(0)
+        _ColumnViewHost._on_row_pressed(
+            host, gesture, 1, 1, 1, self.column, SimpleNamespace(uri="file:///tmp/2")
+        )
+        host._align_to_viewport_pos.assert_called_once_with(self.column, 24)
 
     def test_regular_file_open_uses_mime_handler_not_file_uri_handler(self):
         host = _ColumnViewHost.__new__(_ColumnViewHost)

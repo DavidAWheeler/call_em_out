@@ -256,6 +256,17 @@ class ColumnInteractions(unittest.TestCase):
         _ColumnViewHost._on_row_released(host, gesture, 1, 1, 1, self.column, row)
         host._align_to_viewport_pos.assert_called_once_with(self.column, 24)
 
+    def test_blank_surface_click_reveals_hidden_column(self):
+        host = SimpleNamespace(
+            columns=[self.column],
+            _column_fully_visible=Mock(return_value=False),
+            _align_to_viewport_pos=Mock(),
+        )
+        gesture = Mock()
+        gesture.get_current_button.return_value = Gdk.BUTTON_PRIMARY
+        _ColumnViewHost._on_column_reveal_click(host, gesture, 1, 2, 300, self.column)
+        host._align_to_viewport_pos.assert_called_once_with(self.column, 24)
+
     def test_regular_file_open_uses_mime_handler_not_file_uri_handler(self):
         host = _ColumnViewHost.__new__(_ColumnViewHost)
         host._browse_archive = Mock()

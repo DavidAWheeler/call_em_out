@@ -940,6 +940,15 @@ class _ColumnViewHost:
         right_click = Gtk.GestureClick(button=3)
         right_click.connect("pressed", self._on_column_background_right_clicked, column)
         column.add_controller(right_click)
+        reveal_click = Gtk.GestureClick()
+        reveal_click.set_button(Gdk.BUTTON_PRIMARY)
+        # Capture the completed click at the column surface so an exposed
+        # sliver or blank list area can reveal a hidden column even when no
+        # row widget receives the release. No action is taken on press, which
+        # keeps a file DragSource from moving the viewport under its target.
+        reveal_click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        reveal_click.connect("released", self._on_column_reveal_click, column)
+        column.add_controller(reveal_click)
         drop = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
         # Gtk.ListView owns the column's child surface. Capture at the
         # scrolled-window level so the blank space below/beside its rows is a
@@ -956,6 +965,23 @@ class _ColumnViewHost:
         column._perform_drop = self._perform_drop_to
         column._choose_drop_action = self._on_column_drop_motion
         return column
+
+    def _on_column_reveal_click(
+        self,
+        gesture: Gtk.GestureClick,
+        _n_press: int,
+        _x: float,
+        _y: float,
+        column: Gtk.Widget,
+    ) -> None:
+        """Reveal a partly hidden column after a click anywhere on it."""
+        if gesture.get_current_button() != Gdk.BUTTON_PRIMARY:
+            return
+        if column not in getattr(self, "columns", []):
+            return
+        index = self.columns.index(column)
+        if not self._column_fully_visible(index):
+            self._align_to_viewport_pos(column, 24)
 
     @staticmethod
     def _is_browsable_archive(content_type: str | None, uri: str) -> bool:
